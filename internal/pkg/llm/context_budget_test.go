@@ -124,3 +124,23 @@ func TestContextBudgetKeepsDraftAcrossConfirmationTurn(t *testing.T) {
 		t.Fatal("confirmation lost its control result")
 	}
 }
+
+func TestContextBudgetKeepsGlobalLimitForKnownAndUnknownModels(t *testing.T) {
+	for _, name := range []string{"gpt-6.1-terra", "private-alias"} {
+		t.Run(name, func(t *testing.T) {
+			stub := &einoStubClient{}
+			base, err := NewClientChatModel(ClientChatModelConfig{Client: stub, Model: name})
+			if err != nil {
+				t.Fatal(err)
+			}
+			bounded := WithContextBudget(base.(model.ToolCallingChatModel), ContextBudget{Window: 16000, Output: 2048})
+			_, err = bounded.Generate(context.Background(), []*schema.Message{schema.UserMessage(strings.Repeat("x", 20000))})
+			if !errors.Is(err, ErrContextBudgetExceeded) {
+				t.Fatalf("global limit not enforced: %v", err)
+			}
+			if len(stub.lastReq.Messages) != 0 {
+				t.Fatal("rejected request reached provider")
+			}
+		})
+	}
+}

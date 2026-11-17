@@ -109,15 +109,14 @@ type OperationActionExecutor func(ctx context.Context, operation *model.Operatio
 
 // Handler bundles the aiops service with HTTP-layer state.
 type Handler struct {
-	contextBudget llm.ContextBudget
-	svc           AIOpsService
-	mentions      MentionSearcher
-	catalog       ModelCatalog
-	agents        AgentLister
-	userAgents    UserAgentManager
-	llmClient     llm.Client // for /v1/aiops/query-translate; nil = endpoint 503
-	operations    OperationReader
-	opAction      OperationActionExecutor
+	svc        AIOpsService
+	mentions   MentionSearcher
+	catalog    ModelCatalog
+	agents     AgentLister
+	userAgents UserAgentManager
+	llmClient  llm.Client // for /v1/aiops/query-translate; nil = endpoint 503
+	operations OperationReader
+	opAction   OperationActionExecutor
 }
 
 // NewHandler builds the handler. mentions / catalog may be nil; see
@@ -130,8 +129,6 @@ func (h *Handler) SetMentionSearcher(m MentionSearcher) { h.mentions = m }
 
 // SetModelCatalog wires the multi-provider catalog post-construction.
 func (h *Handler) SetModelCatalog(c ModelCatalog) { h.catalog = c }
-
-func (h *Handler) SetContextBudget(budget llm.ContextBudget) { h.contextBudget = budget }
 
 // SetLLMClient wires the LLM client used by /v1/aiops/query-translate
 // (the natural-language → LogQL/TraceQL/PromQL helper). Optional —
@@ -828,8 +825,6 @@ func eventName(t chatprotocol.EventType) string {
 
 func eventPayload(sessionID string, e chatprotocol.Event) any {
 	switch e.Type {
-	case chatprotocol.EventContextUsage:
-		return e.ContextUsage
 	case chatprotocol.EventAssistant:
 		if e.Assistant == nil {
 			return map[string]any{"session_id": sessionID}
@@ -1186,7 +1181,6 @@ func (h *Handler) listModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	type providerDTO struct {
-		ContextBudgets        map[string]llm.ContextBudget       `json:"context_budgets"`
 		ReasoningCapabilities map[string]llm.ReasoningCapability `json:"reasoning_capabilities,omitempty"`
 		ReasoningEfforts      map[string][]string                `json:"reasoning_efforts,omitempty"`
 		ID                    string                             `json:"id"`
@@ -1214,14 +1208,12 @@ func (h *Handler) listModels(w http.ResponseWriter, r *http.Request) {
 			providers = h.catalog.Providers()
 		}
 		for _, p := range providers {
-			budgets := make(map[string]llm.ContextBudget)
 			efforts := make(map[string][]string)
 			capabilities := make(map[string]llm.ReasoningCapability)
 			for _, model := range append(append([]string(nil), p.Models...), p.Model) {
 				if model == "" {
 					continue
 				}
-				budgets[model] = p.ContextBudget(model, h.contextBudget)
 				capability := p.Reasoning(model)
 				capabilities[model] = capability
 				if levels := capability.Levels; len(levels) > 0 {
@@ -1229,7 +1221,6 @@ func (h *Handler) listModels(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			out.Providers = append(out.Providers, providerDTO{
-				ContextBudgets:        budgets,
 				ReasoningCapabilities: capabilities,
 				ReasoningEfforts:      efforts,
 				ID:                    p.ID,

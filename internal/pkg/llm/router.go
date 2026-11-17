@@ -45,7 +45,6 @@ type ProviderConfig struct {
 // ProviderInfo is the subset of ProviderConfig safe to leak through the
 // HTTP /v1/aiops/models endpoint (no API key).
 type ProviderInfo struct {
-	ContextLimits          map[string]ModelLimits
 	DefaultReasoningEffort string
 	ReasoningCapabilities  map[string]ReasoningCapability
 	ID                     string
@@ -213,7 +212,6 @@ func (m *MultiClient) activeSubs(ctx context.Context) (map[string]Client, []Prov
 	}
 
 	capabilities := make([]map[string]ReasoningCapability, len(cfgs))
-	limits := make([]map[string]ModelLimits, len(cfgs))
 	var discoveries sync.WaitGroup
 	for i, p := range cfgs {
 		if discovery == nil || strings.TrimSpace(p.APIKey) == "" {
@@ -223,14 +221,7 @@ func (m *MultiClient) activeSubs(ctx context.Context) (map[string]Client, []Prov
 		discoveries.Add(1)
 		go func(i int, p ProviderConfig) {
 			defer discoveries.Done()
-			catalog := discovery.models(ctx, p)
-			capabilities[i] = providerReasoning(p, catalog)
-			limits[i] = make(map[string]ModelLimits)
-			for id, item := range catalog {
-				if item.Limits != nil {
-					limits[i][id] = *item.Limits
-				}
-			}
+			capabilities[i] = providerReasoning(p, discovery.capabilities(ctx, p))
 		}(i, p)
 	}
 	discoveries.Wait()
@@ -246,7 +237,7 @@ func (m *MultiClient) activeSubs(ctx context.Context) (map[string]Client, []Prov
 		if len(models) == 0 && p.Model != "" {
 			models = []string{p.Model}
 		}
-		newInfos = append(newInfos, ProviderInfo{ContextLimits: limits[i], DefaultReasoningEffort: p.DefaultReasoningEffort, ReasoningCapabilities: capabilities[i], ID: p.ID, Label: p.Label, Model: p.Model, Models: models})
+		newInfos = append(newInfos, ProviderInfo{DefaultReasoningEffort: p.DefaultReasoningEffort, ReasoningCapabilities: capabilities[i], ID: p.ID, Label: p.Label, Model: p.Model, Models: models})
 	}
 	sort.Slice(newInfos, func(i, j int) bool { return newInfos[i].ID < newInfos[j].ID })
 
@@ -303,10 +294,6 @@ func (m *MultiClient) ProvidersContext(ctx context.Context) []ProviderInfo {
 	for i, info := range infos {
 		out[i] = info
 		out[i].Models = append([]string(nil), info.Models...)
-		out[i].ContextLimits = make(map[string]ModelLimits, len(info.ContextLimits))
-		for model, limits := range info.ContextLimits {
-			out[i].ContextLimits[model] = limits
-		}
 		out[i].ReasoningCapabilities = make(map[string]ReasoningCapability, len(info.ReasoningCapabilities))
 		for model, capability := range info.ReasoningCapabilities {
 			capability.Levels = append([]string{}, capability.Levels...)
@@ -314,24 +301,6 @@ func (m *MultiClient) ProvidersContext(ctx context.Context) []ProviderInfo {
 		}
 	}
 	return out
-}
-
-func (p ProviderInfo) ContextBudget(model string, fallback ContextBudget) ContextBudget {
-	limits, ok := p.ContextLimits[model]
-	if ok {
-		return ResolveContextBudget(p.ID, model, fallback, &limits)
-	}
-	return ResolveContextBudget(p.ID, model, fallback, nil)
-}
-
-func (m *MultiClient) ContextBudget(ctx context.Context, provider, model string, fallback ContextBudget) ContextBudget {
-	_, infos, _, _ := m.activeSubs(ctx)
-	for _, p := range infos {
-		if p.ID == provider {
-			return p.ContextBudget(model, fallback)
-		}
-	}
-	return ResolveContextBudget(provider, model, fallback, nil)
 }
 
 func (p ProviderInfo) Reasoning(model string) ReasoningCapability {

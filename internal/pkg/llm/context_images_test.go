@@ -21,13 +21,16 @@ func TestImageBudgetIgnoresBase64SizeAndPreservesRequest(t *testing.T) {
 		var buf bytes.Buffer
 		encoder := png.Encoder{CompressionLevel: compression}
 		require.NoError(t, encoder.Encode(&buf, img))
+		if compression == png.NoCompression {
+			require.Greater(t, buf.Len(), 192<<10)
+		}
 		encoded := base64.StdEncoding.EncodeToString(buf.Bytes())
 		msg := schema.UserMessage("Explain this screenshot.")
 		msg.UserInputMultiContent = []schema.MessageInputPart{{Type: schema.ChatMessagePartTypeImageURL, Image: &schema.MessageInputImage{MessagePartCommon: schema.MessagePartCommon{MIMEType: "image/png", Base64Data: &encoded}}}}
 		before, _ := json.Marshal(msg)
-		cost, err := estimateMessageTokens(msg, "openai", "gpt-4o")
+		cost, err := estimateMessageTokens(msg)
 		require.NoError(t, err)
-		require.Less(t, cost, 1000)
+		require.Less(t, cost, 8192)
 		if prior != 0 {
 			require.Equal(t, prior, cost)
 		}
@@ -51,14 +54,14 @@ func TestImageBudgetCountsImagesAndTextSeparately(t *testing.T) {
 	url := "https://example.invalid/image.png"
 	msg := schema.UserMessage("text")
 	msg.UserInputMultiContent = []schema.MessageInputPart{{Type: schema.ChatMessagePartTypeImageURL, Image: &schema.MessageInputImage{MessagePartCommon: schema.MessagePartCommon{URL: &url}}}}
-	one, err := estimateMessageTokens(msg, "custom", "alias")
+	one, err := estimateMessageTokens(msg)
 	require.NoError(t, err)
 	msg.UserInputMultiContent = append(msg.UserInputMultiContent, msg.UserInputMultiContent[0])
-	two, err := estimateMessageTokens(msg, "custom", "alias")
+	two, err := estimateMessageTokens(msg)
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, two-one, 32768)
 	msg.Content += "additional text"
-	more, err := estimateMessageTokens(msg, "custom", "alias")
+	more, err := estimateMessageTokens(msg)
 	require.NoError(t, err)
 	require.Equal(t, len("additional text"), more-two)
 }

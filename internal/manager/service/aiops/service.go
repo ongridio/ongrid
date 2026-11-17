@@ -663,7 +663,7 @@ func (s *Service) runGraph(ctx context.Context, sess *model.Session, content str
 // chatprotocol.Event shape so the SSE handler can keep its existing
 // switch-on-Type code path untouched. Frame names stay byte-equal.
 func translateRuntimeEvent(ev chatruntime.Event) chatprotocol.Event {
-	out := chatprotocol.Event{Type: chatprotocol.EventType(ev.Type), ContextUsage: ev.ContextUsage}
+	out := chatprotocol.Event{Type: chatprotocol.EventType(ev.Type)}
 	if ev.Assistant != nil {
 		out.Assistant = &chatprotocol.AssistantEvent{
 			Iteration:        ev.Assistant.Iteration,

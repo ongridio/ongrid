@@ -11,16 +11,10 @@ The [design](../design/tool-result-storage.md) describes the contracts and defer
 | `ONGRID_TOOL_RESULTS_ENABLED` | `false` | Capture new tool results; exact value `true` enables capture and maintenance |
 | `ONGRID_TOOL_RESULTS_DIR` | `/var/lib/ongrid/tool-results` | Manager path; Compose mounts this fixed container path |
 | `ONGRID_TOOL_RESULTS_MAX_BYTES` | `10737418240` | Directory file-byte quota, minimum 128 MiB; excludes SQL inline data |
-| `ONGRID_LLM_CONTEXT_WINDOW` | `131072` | Fallback context window for unknown models in v2/v3 requests |
-| `ONGRID_LLM_OUTPUT_TOKENS` | `8192` | Output reserve/cap, reduced to the model output limit when known |
+| `ONGRID_LLM_CONTEXT_WINDOW` | `131072` | Conservative total token budget for each v2/v3 model request |
+| `ONGRID_LLM_OUTPUT_TOKENS` | `8192` | Reserved output tokens, also sent to the provider |
 
-Each request resolves its selected model's context window in this order: valid provider catalog metadata, built-in model specifications, then `ONGRID_LLM_CONTEXT_WINDOW`. Unknown models and private aliases use the global fallback; configure it for the capacity those aliases actually expose. Known model names and dated snapshots use their own capacity. These limits also apply with capture disabled. The output reserve remains capped by `ONGRID_LLM_OUTPUT_TOKENS` and any known model output limit.
-
-Text and tool schemas use a conservative serialized UTF-8 byte estimate. Images are counted separately from their Base64 data, using dimensions and known model rules or a conservative patch estimate. PNG/JPEG/WebP headers are read without decoding pixels. Remote image URLs are not fetched; unavailable dimensions receive a fixed allowance. This is an estimate, not a provider tokenizer or billing count. After removing old evidence, requests that still exceed the budget fail before reaching the provider. Context rejection and daily-token-budget rejection have distinct messages.
-
-The chat composer and assistant panel show a context ring. Its popup shows the model capacity, latest prepared input estimate, output reserve, and capacity source. It includes system prompts, tools and images; it excludes the unsent draft and accumulated billing usage. The estimate updates through SSE for the current chat request, is hidden when the selected model changes, and is not persisted across page reloads. Before the first estimate, the popup shows capacity only. Trimming affects the provider request; stored conversation messages remain intact.
-
-Built-in specifications were checked on 2026-11-17 against the official [OpenAI model catalog](https://developers.openai.com/api/docs/models), [Anthropic model overview](https://platform.claude.com/docs/en/about-claude/models/overview), [Gemini models](https://ai.google.dev/gemini-api/docs/models), [GLM-4.7](https://docs.bigmodel.cn/cn/guide/models/text/glm-4.7), [DeepSeek models](https://api-docs.deepseek.com/quick_start/pricing), [MiniMax API](https://platform.minimax.io/docs/api-reference/text-openai-api), [MiniMax M2.5 configuration](https://huggingface.co/MiniMaxAI/MiniMax-M2.5/blob/main/config.json), and [Kimi model documentation](https://platform.moonshot.ai/docs/intro). Image estimation follows the known [OpenAI image rules](https://developers.openai.com/api/docs/guides/images-vision) and [Anthropic vision rules](https://platform.claude.com/docs/en/build-with-claude/vision); unlisted models use conservative estimates. Provider metadata takes precedence so endpoint-specific limits can replace the built-in values.
+Use a context window no larger than the smallest model that users can select. These LLM limits apply even with capture disabled. Input estimation uses serialized UTF-8 bytes for text, schemas and reasoning data. Images are counted separately using pixel dimensions, with a fixed allowance when dimensions are unavailable; their Base64 data is not charged as text. These allowances remain approximate, and requests retain the same global context and output limits. After removing old evidence, requests that still exceed the budget fail before reaching the provider.
 
 The installer Compose file mounts `${ONGRID_DATA_DIR:-/var/lib/ongrid}/tool-results` from the host. The development Compose file mounts `../.cache/ongrid-tool-results`. Existing installer permission repair creates the directory for UID/GID 65532. For a manual development deployment, create the bind-mount directory with that owner before starting the non-root Manager. Do not place this directory under nginx's web root or expose it as a static download directory.
 
@@ -51,7 +45,7 @@ Back up the result directory and SQL together, and validate a restore with check
 
 ## Roll back
 
-Set `ONGRID_TOOL_RESULTS_ENABLED=false` to stop new captures. Keep the reference-aware code, result tables, LONGTEXT columns and volume so existing results can still be read. Context budgets remain active; the global window setting controls unknown models only.
+Set `ONGRID_TOOL_RESULTS_ENABLED=false` to stop new captures. Keep the reference-aware code, result tables, LONGTEXT columns and volume so existing results can still be read. Context budgets remain active and can be adjusted to the model's supported limits.
 
 An arbitrary older binary is not a safe rollback target: it may not understand references and may run TEXT migrations. Do not shrink columns or delete the result volume as part of rollback. Returning to a version without reference support requires a separate data-conversion plan; results beyond its inline capacity cannot be restored losslessly to that format.
 

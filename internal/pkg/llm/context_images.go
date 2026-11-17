@@ -10,7 +10,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-func estimateMessageTokens(msg *schema.Message, provider, model string) (int, error) {
+func estimateMessageTokens(msg *schema.Message) (int, error) {
 	cp := *msg
 	cp.UserInputMultiContent = append([]schema.MessageInputPart(nil), msg.UserInputMultiContent...)
 	cp.MultiContent = append([]schema.ChatMessagePart(nil), msg.MultiContent...)
@@ -20,7 +20,7 @@ func estimateMessageTokens(msg *schema.Message, provider, model string) (int, er
 			continue
 		}
 		img := *part.Image
-		images += estimateImageTokens(provider, model, img.MIMEType, img.Base64Data, img.URL, img.Detail)
+		images += estimateImageTokens(img.MIMEType, img.Base64Data, img.URL)
 		img.Base64Data, img.URL = nil, nil
 		cp.UserInputMultiContent[i].Image = &img
 	}
@@ -29,7 +29,7 @@ func estimateMessageTokens(msg *schema.Message, provider, model string) (int, er
 			continue
 		}
 		img := *part.ImageURL
-		images += estimateImageTokens(provider, model, "", nil, &img.URL, img.Detail)
+		images += estimateImageTokens("", nil, &img.URL)
 		img.URL = ""
 		cp.MultiContent[i].ImageURL = &img
 	}
@@ -37,7 +37,7 @@ func estimateMessageTokens(msg *schema.Message, provider, model string) (int, er
 	return len(b) + 32 + images, err
 }
 
-func estimateImageTokens(provider, model, mime string, data, url *string, detail schema.ImageURLDetail) int {
+func estimateImageTokens(mime string, data, url *string) int {
 	encoded := ""
 	if data != nil {
 		encoded = *data
@@ -56,37 +56,8 @@ func estimateImageTokens(provider, model, mime string, data, url *string, detail
 		return 32768
 	}
 	width, height := float64(w), float64(h)
-	name := strings.ToLower(model)
-	if (provider == ProviderAnthropic || strings.HasPrefix(name, "claude-")) && builtinModelLimits(provider, name) != nil {
-		cap := 4784.0
-		for _, standard := range strings.Fields("claude-opus-4 claude-opus-4-1 claude-opus-4-5 claude-opus-4-6 claude-sonnet-4 claude-sonnet-4-5 claude-sonnet-4-6 claude-haiku-4-5") {
-			if modelVersion(name, standard) {
-				cap = 1568
-				break
-			}
-		}
-		return int(min(cap, math.Ceil(width/28)*math.Ceil(height/28))) + 64
-	}
-	base, tile := 0, 0
-	switch {
-	case modelVersion(name, "gpt-4o-mini"):
-		base, tile = 2833, 5667
-	case modelVersion(name, "gpt-4o"), modelVersion(name, "gpt-4.1"):
-		base, tile = 85, 170
-	case modelVersion(name, "gpt-5"), modelVersion(name, "gpt-5.1"):
-		base, tile = 70, 140
-	}
-	if tile > 0 {
-		if detail == schema.ImageURLDetailLow {
-			return base
-		}
-		scale := min(1.0, 2048/math.Max(width, height))
-		width, height = width*scale, height*scale
-		scale = min(1.0, 768/math.Min(width, height))
-		return base + tile*int(math.Ceil(width*scale/512)*math.Ceil(height*scale/512))
-	}
-	// A conservative patch estimate avoids charging compressed bytes as text.
-	// Unknown models retain headroom rather than assuming a vendor tokenizer.
+	// shortcut: pixel allowances are approximate; use provider token-count APIs
+	// if exact multimodal budgeting is required.
 	patches := math.Ceil(width/32) * math.Ceil(height/32)
 	return max(4096, int(math.Ceil(patches*3)))
 }

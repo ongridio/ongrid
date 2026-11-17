@@ -11,9 +11,8 @@ import (
 )
 
 type ContextBudget struct {
-	Window int    `json:"window"`
-	Output int    `json:"output"`
-	Source string `json:"source"`
+	Window int
+	Output int
 }
 type contextBudgetModel struct {
 	inner  model.ToolCallingChatModel
@@ -23,8 +22,15 @@ type contextBudgetModel struct {
 
 // WithContextBudget limits every provider request, including each ReAct step.
 // UTF-8 byte counts conservatively estimate text tokens without assuming a
-// particular provider tokenizer. Images use a separate, pixel-based estimate.
+// particular provider tokenizer. Images are counted separately from Base64 data.
+// Configuration must fit the selected model.
 func WithContextBudget(inner model.ToolCallingChatModel, budget ContextBudget) model.ToolCallingChatModel {
+	if budget.Window == 0 {
+		budget.Window = 131072
+	}
+	if budget.Output == 0 {
+		budget.Output = 8192
+	}
 	return &contextBudgetModel{inner: inner, budget: budget}
 }
 func (m *contextBudgetModel) WithTools(tools []*schema.ToolInfo) (model.ToolCallingChatModel, error) {
@@ -38,43 +44,22 @@ func (m *contextBudgetModel) WithTools(tools []*schema.ToolInfo) (model.ToolCall
 	return &cp, nil
 }
 func (m *contextBudgetModel) Generate(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.Message, error) {
-	msgs, options, err := m.prepare(ctx, input, opts)
+	msgs, options, err := m.prepare(input, opts)
 	if err != nil {
 		return nil, err
 	}
 	return m.inner.Generate(ctx, msgs, options...)
 }
 func (m *contextBudgetModel) Stream(ctx context.Context, input []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
-	msgs, options, err := m.prepare(ctx, input, opts)
+	msgs, options, err := m.prepare(input, opts)
 	if err != nil {
 		return nil, err
 	}
 	return m.inner.Stream(ctx, msgs, options...)
 }
-func (m *contextBudgetModel) prepare(ctx context.Context, input []*schema.Message, opts []model.Option) ([]*schema.Message, []model.Option, error) {
-	provider, name := "", ""
-	if router, ok := m.inner.(*RoutingChatModel); ok {
-		opts = router.withDynamicDefault(ctx, opts)
-		inner, p, err := router.pick(opts...)
-		if err != nil {
-			return nil, nil, err
-		}
-		provider = p
-		name = chatModelName(inner)
-	} else {
-		provider = model.GetImplSpecificOptions(&providerOpts{}, opts...).provider
-		name = chatModelName(m.inner)
-	}
+func (m *contextBudgetModel) prepare(input []*schema.Message, opts []model.Option) ([]*schema.Message, []model.Option, error) {
 	common := model.GetCommonOptions(&model.Options{}, opts...)
-	if common.Model != nil {
-		name = *common.Model
-	}
-	budget := ResolveContextBudget(provider, name, m.budget, nil)
-	if router, ok := m.inner.(*RoutingChatModel); ok && router.contextBudgetResolver != nil {
-		budget = router.contextBudgetResolver(ctx, provider, name, m.budget)
-	}
-
-	output := budget.Output
+	output := m.budget.Output
 	if common.MaxTokens != nil && *common.MaxTokens > 0 {
 		output = min(output, *common.MaxTokens)
 	}
@@ -104,7 +89,7 @@ func (m *contextBudgetModel) prepare(ctx context.Context, input []*schema.Messag
 		}
 	}
 	// Protocol framing and provider-specific reasoning/tool wrappers need room.
-	limit := budget.Window - output - 4096 - definitions
+	limit := m.budget.Window - output - 4096 - definitions
 	if limit <= 0 || output <= 0 {
 		return nil, nil, fmt.Errorf("%w: tool definitions and output reserve exceed context window", ErrContextBudgetExceeded)
 	}
@@ -119,7 +104,7 @@ func (m *contextBudgetModel) prepare(ctx context.Context, input []*schema.Messag
 				cost, ok := estimates[v]
 				if !ok {
 					var err error
-					cost, err = estimateMessageTokens(v, provider, name)
+					cost, err = estimateMessageTokens(v)
 					if err != nil {
 						return available + 1
 					}
@@ -217,9 +202,6 @@ func (m *contextBudgetModel) prepare(ctx context.Context, input []*schema.Messag
 	if changed {
 		msgs = append([]*schema.Message{schema.SystemMessage("Earlier evidence was omitted to fit the context budget. Tool previews and query pages are partial; use saved result IDs to retrieve specific evidence. Do not infer completeness or repeat completed actions.")}, msgs...)
 	}
-	if observer := model.GetImplSpecificOptions(&contextUsageOptions{}, opts...).observe; observer != nil {
-		observer(ContextUsage{Provider: provider, Model: name, Window: budget.Window, InputTokens: size() + definitions + 4096, OutputTokens: output, Source: budget.Source, Trimmed: changed})
-	}
 	if size() > available {
 		return nil, nil, fmt.Errorf("%w: required messages need %d estimated tokens, available %d; reduce input or tool definitions", ErrContextBudgetExceeded, size(), available)
 	}
@@ -258,15 +240,4 @@ func compactToolContent(content string) string {
 	}
 	b, _ := json.Marshal(view) // validated RawMessages and scalars only
 	return string(b)
-}
-
-func chatModelName(inner model.BaseChatModel) string {
-	switch m := inner.(type) {
-	case *clientChatModel:
-		return m.model
-	case *derivedChatModel:
-		return chatModelName(m.tcm)
-	default:
-		return ""
-	}
 }

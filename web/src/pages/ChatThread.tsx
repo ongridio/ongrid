@@ -21,7 +21,6 @@ import {
   updateSessionModel,
   uploadChatAttachment,
   type ChatMessage,
-  type ContextUsage,
   type LLMProvider,
   type Mention,
   type ImageAttachment,
@@ -86,7 +85,6 @@ export default function ChatThreadPage() {
   // for the lifetime of the open chat thread (the SPA spec calls this
   // "session-level state"). Empty providers → ChatInput hides the
   // selector entirely.
-  const [contextUsage, setContextUsage] = useState<{ sessionId: string; usage: ContextUsage } | null>(null);
   const [providers, setProviders] = useState<LLMProvider[]>([]);
   // The backend session is authoritative. Legacy sessions with no persisted
   // route use the live server catalog default.
@@ -469,9 +467,6 @@ export default function ChatThreadPage() {
               ];
             });
           },
-          onContextUsage: usage => {
-            if (activeSessionRef.current === turnSessionID) setContextUsage({ sessionId: turnSessionID, usage });
-          },
           onDone: () => {
             if (activeSessionRef.current !== turnSessionID) return;
             invalidateChatSessions();
@@ -737,7 +732,6 @@ export default function ChatThreadPage() {
               disabled={submitting}
               autoFocus
               placeholder={tr('继续聊…  Shift+Enter 换行', 'Continue the conversation… Shift+Enter for newline')}
-              contextUsage={contextUsage?.sessionId === sessionId ? contextUsage.usage : null}
               providers={providers}
               selectedModel={selectedModel}
               onModelChange={(model) => void handleSessionModelChange(model)}

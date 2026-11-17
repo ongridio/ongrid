@@ -1,13 +1,12 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft, ArrowUp, BookOpen, ChevronDown, ExternalLink, History, Link2, Loader2, Maximize2, MessageSquare, Minimize2, Plus, X } from 'lucide-react';
-import { ContextUsageIndicator } from '@/components/ContextUsageIndicator';
 import { ModelDropdown, WebSearchToggle } from '@/components/ChatModelControls';
 import { MessageBubble } from '@/components/MessageBubble';
 import { Button, EmptyState, Textarea } from '@/components/ui';
 import { Dialog, DialogClose, DialogContent, DialogTitle } from '@/components/ui/Dialog';
 import { useDialogs } from '@/components/ui/useDialogs';
-import { modelSelectionForCatalog, createSession, deleteSession, getMessages, listModels, listSessions, RejectedChatTurnError, streamMessage, updateSessionModel, type ContextUsage, type ChatMessage, type ChatSession, type ModelCatalog, type ModelSelection } from '@/api/chat';
+import { modelSelectionForCatalog, createSession, deleteSession, getMessages, listModels, listSessions, RejectedChatTurnError, streamMessage, updateSessionModel, type ChatMessage, type ChatSession, type ModelCatalog, type ModelSelection } from '@/api/chat';
 import { ApiError } from '@/api/client';
 import { useI18n } from '@/i18n/locale';
 import { useAssistantSource, type AssistantPage } from '@/lib/assistantPage';
@@ -36,7 +35,6 @@ function FloatingAssistant() {
   const [anchor, setAnchor] = useState<Anchor | null>(null);
   const [draft, setDraft] = useState('');
   const [sessionId, setSessionId] = useState('');
-  const [contextUsage, setContextUsage] = useState<{ sessionId: string; usage: ContextUsage } | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [history, setHistory] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -198,7 +196,6 @@ function FloatingAssistant() {
         onAssistant: e => { if (e.content) updateAnswer(e.content); },
         onToolStart: tool => setStatus(tr('正在调用 ', 'Using ') + tool.name),
         onApprovalPending: e => { setApproval(e.approval_id); setStatus(tr('等待审批', 'Waiting for approval')); },
-        onContextUsage: usage => { if (!controller.signal.aborted) setContextUsage({ sessionId: sid, usage }); },
         onDone: reply => { completed = true; if (reply.assistant_message?.content) updateAnswer(reply.assistant_message.content); },
         onError: err => { throw err; },
       }, { locale, ...selectedModel, webSearchEnabled: webSearch }, controller.signal);
@@ -300,7 +297,6 @@ function FloatingAssistant() {
                   {tr('重新加载模型', 'Reload models')}
                 </Button> : catalog ? <ModelDropdown providers={catalog.providers ?? []} selected={selectedModel} onPick={pickModel} disabled={locked}/>
                   : <span role="status" className="text-xs text-text-muted">{tr('正在加载模型…', 'Loading models…')}</span>}
-                <ContextUsageIndicator providers={catalog?.providers ?? []} selected={selectedModel} usage={contextUsage?.sessionId === sessionId ? contextUsage.usage : null} />
                 <WebSearchToggle enabled={webSearch} onToggle={setWebSearch} disabled={locked}/>
               </div>
               {sessionId && <Button variant="link" className="ml-auto" disabled={savingModel} onClick={fullChat}><ExternalLink size={13}/>{tr('打开完整会话', 'Open full conversation')}</Button>}
