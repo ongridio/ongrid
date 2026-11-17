@@ -200,6 +200,7 @@ func buildV2AIOpsRuntime(
 		SkillRegistry:   skillReg,
 		AgentRegistry:   agentReg,
 		Sessions:        sessions,
+		Results:         toolsReg.ToolResults(),
 		ChatModel:       chatModel,
 		ToolBag:         wrapped,
 		MentionResolver: nil, // wired below if we have a searcher

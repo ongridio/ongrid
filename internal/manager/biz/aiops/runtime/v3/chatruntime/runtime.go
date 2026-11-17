@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/ongridio/ongrid/internal/manager/biz/toolresult"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -57,6 +58,7 @@ const (
 // caller's job at construction time so the decorator deps (audit
 // sink, limiter, registerer) live exactly once per process.
 type Config struct {
+	Results *toolresult.Usecase
 	// SkillRegistry holds the parsed SKILL.md descriptors. May be
 	// empty (nil-safe ComposeSystemPrompt).
 	SkillRegistry *SkillRegistry
@@ -599,6 +601,9 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (result *Reply, ret
 	toolPersistence := callbacks.EnableSynchronousToolPersistence(handlers)
 	graphCfg.ToolPersistence = toolPersistence
 	sessionToolBag = skillLoader.bind(sessionToolBag, rt.cfg.CredentialBinder)
+	if rt.cfg.Results != nil {
+		sessionToolBag = rt.cfg.Results.BindTools(toolresult.Scope{SessionID: sess.ID, UserID: sess.UserID}, sessionToolBag)
+	}
 	g, err := graph.BuildReActGraph(rt.cfg.ChatModel, sessionToolBag, graphCfg)
 	if err != nil {
 		return nil, fmt.Errorf("chatruntime: build graph: %w", err)
@@ -1577,6 +1582,8 @@ func buildGraphErrorApology(err error) string {
 	msg := err.Error()
 	low := strings.ToLower(msg)
 	switch {
+	case errors.Is(err, llm.ErrBudgetExceeded):
+		return "今日 LLM token 预算不足，无法继续调用。请联系管理员调整每日限额，或等待预算重置。"
 	// LLM hallucinated a tool name not in its actual schema (e.g.
 	// model "remembers" `get_host_load` from training even though
 	// only `query_devices / query_knowledge / ...` were presented).
@@ -1599,8 +1606,6 @@ func buildGraphErrorApology(err error) string {
 		return "我跑了很多轮工具调用还是没收敛 — 大概率是搜索路径走偏了。上面工具调用区已经有阶段性数据，可以直接看；也可以这样收敛：\n• 把问题缩小成「看 X 指标的 Y 现象」——给具体 metric / device 让我聚焦\n• 或者告诉我「已经看到 A / B / C，下一步从 D 这条线索查」\n• 也可以直接 @ 一个 specialist（如 @specialist-compute 看 CPU/内存）让专家接手"
 	case strings.Contains(low, "context canceled"), strings.Contains(low, "context deadline"):
 		return "本次请求超时或被取消。一般是上游 LLM / 设备响应慢。请稍后重试，或换简单的问法。"
-	case strings.Contains(low, "budget"):
-		return "今日 LLM 预算已用完。请联系 admin 调整配额或明天再试。"
 	// History replay produced a tool_calls envelope that the upstream
 	// provider rejected because one or more tool responses are missing
 	// from chat_messages (eino ToolsNode dropped an OnEnd in parallel

@@ -50,6 +50,7 @@ type ToolChangeHook func(ctx context.Context, serverName string, server *model.S
 
 // Usecase is the MCP-server-registration facade.
 type Usecase struct {
+	callSlots           chan struct{}
 	repo                Repo
 	secrets             SecretResolver
 	log                 *slog.Logger
@@ -82,7 +83,8 @@ func NewUsecase(repo Repo, secrets SecretResolver, log *slog.Logger) *Usecase {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Usecase{repo: repo, secrets: secrets, log: log, registrationChanges: make(chan struct{}, 1), commitGate: make(chan struct{}, 1), latestProbe: make(map[uint64]uint64), manualProbes: make(map[uint64]int)}
+	return &Usecase{repo: repo, secrets: secrets, log: log, registrationChanges: make(chan struct{}, 1),
+		callSlots: make(chan struct{}, 2), commitGate: make(chan struct{}, 1), latestProbe: make(map[uint64]uint64), manualProbes: make(map[uint64]int)}
 }
 
 // RegistrationChanges 唤醒唯一的发现 supervisor。合并连续变更，由消费者重新读取
@@ -224,6 +226,14 @@ func (u *Usecase) CallTool(ctx context.Context, serverName, toolName string, arg
 // CallToolRevision prevents a pending approval from following a replaced endpoint,
 // credential or tool schema. Empty revision is reserved for existing direct callers.
 func (u *Usecase) CallToolRevision(ctx context.Context, serverName, toolName string, args map[string]any, revision string) (string, error) {
+	if u.callSlots != nil {
+		select {
+		case u.callSlots <- struct{}{}:
+			defer func() { <-u.callSlots }()
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
 	s, err := u.repo.GetByName(ctx, serverName)
 	if err != nil {
 		return "", err

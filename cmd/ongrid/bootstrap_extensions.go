@@ -132,6 +132,7 @@ func bootstrapExtensions(rootCtx context.Context, cfg *config.Config, log *slog.
 	// actions (agent cloud-shell, etc.). Additive — empty until a producer
 	// proposes; producers register their execute-on-approve executor.
 	approvalUC := managerbizapproval.NewUsecase(managerapprovaldata.NewRepo(storage.db), log.With(slog.String("comp", "approval")))
+	approvalUC.SetToolResults(aiops.toolsReg.ToolResults())
 	runtime.humanApprovalBroker.SetUsecase(approvalUC)
 	approvalUC.RegisterExecutor(managersvcaiops.GenericToolApprovalKind, runtime.humanApprovalBroker.Execute)
 	managersvcaiops.RegisterRuntimeApprovalExecutor(approvalUC, managersvcaiops.GenericToolApprovalKind, contract.V3, runtime.humanApprovalBroker.Execute)

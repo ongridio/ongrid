@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	externalmcpdata "github.com/ongridio/ongrid/internal/manager/data/externalmcp"
+	resultdata "github.com/ongridio/ongrid/internal/manager/data/toolresult/store"
 	"log/slog"
 
 	iamdatatoken "github.com/ongridio/ongrid/internal/iam/data/integrationtoken"
@@ -69,6 +70,7 @@ func bootstrapStorage(rootCtx context.Context, cfg *config.Config, log *slog.Log
 		managertopologydata.Migrate,
 		managermetricdata.Migrate,
 		manageraiopsdata.Migrate,
+		resultdata.Migrate,
 		externalmcpdata.Migrate,
 		managerbizskill.Migrate,
 		managersettingdata.Migrate,

@@ -361,7 +361,7 @@ describe('MessageBubble config draft card', () => {
 });
 
 describe('MessageBubble operation card', () => {
-  it('renders a cancellable running operation card and executes the stop action', async () => {
+  it('renders a cancellable operation from a bounded saved result and executes stop', async () => {
     vi.mocked(getOperation).mockRejectedValue(new Error('skip poll'));
     vi.mocked(executeOperationAction).mockResolvedValue({
       id: 'op-123',
@@ -376,6 +376,7 @@ describe('MessageBubble operation card', () => {
       role: 'tool',
       tool_name: 'capture_pcap',
       content: JSON.stringify({
+        kind: 'tool_result', result_id: 'saved-capture', storage_status: 'ready', preview: 'partial capture response',
         operation: {
           id: 'op-123',
           kind: 'packet_capture_session',

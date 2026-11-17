@@ -40,6 +40,27 @@ func bootstrapRuntime(rootCtx context.Context, cfg *config.Config, log *slog.Log
 		log.Info("interrupted workers closed on startup", slog.Int64("sessions", n))
 	}
 
+	if aiops.resultRepo != nil {
+		go func() {
+			tick := time.NewTicker(5 * time.Minute)
+			defer tick.Stop()
+			for {
+				pass, cancel := context.WithTimeout(rootCtx, 30*time.Second)
+				if _, err := aiops.resultRepo.Recover(pass); err != nil {
+					log.Error("tool results recovery failed", slog.Any("err", err))
+				}
+				if _, err := aiops.resultRepo.Cleanup(pass, time.Now().UTC()); err != nil {
+					log.Error("tool results cleanup failed", slog.Any("err", err))
+				}
+				cancel()
+				select {
+				case <-rootCtx.Done():
+					return
+				case <-tick.C:
+				}
+			}
+		}()
+	}
 	// AgentRegistry + SkillRegistry are loaded UNCONDITIONALLY from
 	// ./agents + configured skill roots + the marketplace root. These are
 	// YAML+markdown metadata, so the /v1/agents
@@ -146,6 +167,7 @@ func bootstrapRuntime(rootCtx context.Context, cfg *config.Config, log *slog.Log
 	}
 
 	aiopsSvc := managersvcaiops.New(aiopsRuntime, aiops.aiopsRepo, aiops.aiopsUsage, log)
+	aiopsSvc.SetToolResults(aiops.results)
 	aiopsSvc.SetMutatingProposalRepo(aiops.mutatingProposalRepo)
 	aiopsSvc.SetPageIncidentCheck(func(ctx context.Context, caller managersvcaiops.Caller, id uint64) error {
 		_, err := aiops.alertSvc.GetIncident(ctx, managersvcalert.Caller{UserID: caller.UserID, Role: caller.Role}, id)

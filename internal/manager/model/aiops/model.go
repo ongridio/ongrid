@@ -174,10 +174,11 @@ func (s *Session) BeforeCreate(*gorm.DB) error {
 // without conflating empty-string with absent. ToolCallID / ToolName are
 // non-nil on role=tool messages.
 type Message struct {
+	ResultID      *string      `gorm:"type:char(36);column:result_id;index" json:"result_id,omitempty"`
 	ID            string       `gorm:"primaryKey;type:char(36);column:id"`
 	SessionID     string       `gorm:"index:idx_session_msg,priority:1;type:char(36);not null;column:session_id"`
 	Role          string       `gorm:"size:16;not null;check:role IN ('user','assistant','tool','system')"`
-	Content       *string      `gorm:"type:text"`
+	Content       *string      `gorm:"type:longtext"`
 	Attachments   []Attachment `gorm:"-" json:"attachments,omitempty"`
 	AttachmentIDs []string     `gorm:"-" json:"-"`
 	ToolCallID    *string      `gorm:"size:64;column:tool_call_id"`
@@ -250,11 +251,12 @@ func (m *Message) BeforeCreate(*gorm.DB) error {
 // the underlying chat_tool_calls.device_id column matches the legacy
 // edge_id 1:1 because the migration reuses the integer.
 type ToolCall struct {
+	ResultID      *string `gorm:"type:char(36);column:result_id;index" json:"result_id,omitempty"`
 	ID            string  `gorm:"primaryKey;type:char(36);column:id"`
 	MessageID     string  `gorm:"index;type:char(36);not null;column:message_id"`
 	ToolName      string  `gorm:"size:64;not null;column:tool_name"`
-	ArgumentsJSON string  `gorm:"type:text;not null;column:arguments_json"`
-	ResultJSON    *string `gorm:"type:text;column:result_json"`
+	ArgumentsJSON string  `gorm:"type:longtext;not null;column:arguments_json"`
+	ResultJSON    *string `gorm:"type:longtext;column:result_json"`
 	Status        string  `gorm:"size:16;not null;default:pending;check:status IN ('pending','success','error','timeout')"`
 	Error         *string `gorm:"size:512;column:error"`
 	StartedAt     time.Time

@@ -15,6 +15,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/ongridio/ongrid/internal/pkg/toolcapture"
 	"io"
 	"net/http"
 	"strings"
@@ -58,8 +59,9 @@ type Tool struct {
 // CallResult is the tools/call payload. Content blocks are flattened to text
 // by TextContent() for the agent-facing result.
 type CallResult struct {
-	Content []ContentBlock `json:"content"`
-	IsError bool           `json:"isError"`
+	StructuredContent json.RawMessage `json:"structuredContent,omitempty"`
+	Content           []ContentBlock  `json:"content"`
+	IsError           bool            `json:"isError"`
 }
 
 // ContentBlock is one MCP content item (we surface text; other kinds are
@@ -81,6 +83,9 @@ func (r *CallResult) TextContent() string {
 		} else {
 			b.WriteString("[" + c.Type + "]")
 		}
+	}
+	if b.Len() == 0 && len(r.StructuredContent) > 0 {
+		return string(r.StructuredContent)
 	}
 	return b.String()
 }
@@ -117,6 +122,7 @@ func (c *Client) ListTools(ctx context.Context) ([]Tool, error) {
 	var tools []Tool
 	cursor := ""
 	seen := map[string]bool{}
+	totalBytes := 0
 	for {
 		params := map[string]any{}
 		if cursor != "" {
@@ -125,6 +131,10 @@ func (c *Client) ListTools(ctx context.Context) ([]Tool, error) {
 		raw, err := c.call(ctx, "tools/list", params)
 		if err != nil {
 			return nil, err
+		}
+		totalBytes += len(raw)
+		if totalBytes > MaxResponseBytes {
+			return nil, fmt.Errorf("mcp: tool catalog exceeds byte limit")
 		}
 		var page struct {
 			Tools []Tool `json:"tools"`
@@ -157,6 +167,7 @@ func (c *Client) CallTool(ctx context.Context, name string, args map[string]any)
 	if err != nil {
 		return nil, err
 	}
+	toolcapture.Raw(ctx, raw, false)
 	var res CallResult
 	if err := json.Unmarshal(raw, &res); err != nil {
 		return nil, fmt.Errorf("mcp: decode tools/call: %w", err)
@@ -177,6 +188,9 @@ func (c *Client) call(ctx context.Context, method string, params any) (json.RawM
 	respBytes, sessionID, err := c.post(ctx, body)
 	if err != nil {
 		return nil, err
+	}
+	if method == "tools/call" {
+		toolcapture.Raw(ctx, respBytes, true)
 	}
 	if sessionID != "" {
 		c.sessionID = sessionID
@@ -239,12 +253,25 @@ func (c *Client) post(ctx context.Context, body map[string]any) ([]byte, string,
 
 	ct := resp.Header.Get("Content-Type")
 	if strings.Contains(ct, "text/event-stream") {
-		msg, err := firstSSEData(resp.Body)
+		var captured bytes.Buffer
+		msg, err := firstSSEData(io.TeeReader(resp.Body, &captured), body["id"])
+		if err != nil && body["method"] == "tools/call" {
+			toolcapture.Raw(ctx, captured.Bytes()[:min(captured.Len(), MaxResponseBytes)], true)
+		}
 		return msg, sessionID, err
 	}
-	b, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	b, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBytes+1))
 	if err != nil {
+		if body["method"] == "tools/call" {
+			toolcapture.Raw(ctx, b, true)
+		}
 		return nil, sessionID, err
+	}
+	if len(b) > MaxResponseBytes {
+		if body["method"] == "tools/call" {
+			toolcapture.Raw(ctx, b[:MaxResponseBytes], true)
+		}
+		return nil, sessionID, fmt.Errorf("mcp: response exceeds %d bytes; execution may already have completed", MaxResponseBytes)
 	}
 	if len(bytes.TrimSpace(b)) == 0 {
 		return []byte(`{"jsonrpc":"2.0"}`), sessionID, nil
@@ -256,38 +283,56 @@ func (c *Client) post(ctx context.Context, body map[string]any) ([]byte, string,
 // that carries a JSON-RPC response (has "result" or "error"). MCP servers
 // stream the response as one or more SSE events; the response message is the
 // one we want.
-func firstSSEData(r io.Reader) ([]byte, error) {
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 0, 64<<10), 8<<20)
+const MaxResponseBytes = 16 << 20
+
+func firstSSEData(r io.Reader, expected any) ([]byte, error) {
+	sc := bufio.NewScanner(io.LimitReader(r, MaxResponseBytes+1))
+	sc.Buffer(make([]byte, 0, 64<<10), MaxResponseBytes+1)
 	var data strings.Builder
+	total := 0
 	flush := func() ([]byte, bool) {
-		s := strings.TrimSpace(data.String())
+		b := []byte(strings.TrimSpace(data.String()))
 		data.Reset()
-		if s == "" {
+		var message struct {
+			ID     json.RawMessage `json:"id"`
+			Result json.RawMessage `json:"result"`
+			Error  json.RawMessage `json:"error"`
+		}
+		if json.Unmarshal(b, &message) != nil || (len(message.Result) == 0 && len(message.Error) == 0) {
 			return nil, false
 		}
-		if bytes.Contains([]byte(s), []byte(`"result"`)) || bytes.Contains([]byte(s), []byte(`"error"`)) {
-			return []byte(s), true
+		if expected != nil {
+			id, err := json.Marshal(expected)
+			if err != nil || !bytes.Equal(id, message.ID) {
+				return nil, false
+			}
 		}
-		return nil, false
+		return b, true
 	}
 	for sc.Scan() {
 		line := sc.Text()
-		if line == "" { // event boundary
-			if msg, ok := flush(); ok {
-				return msg, nil
+		total += len(line) + 1
+		if total > MaxResponseBytes {
+			return nil, fmt.Errorf("mcp: SSE response exceeds %d bytes; execution may already have completed", MaxResponseBytes)
+		}
+		if line == "" {
+			if b, ok := flush(); ok {
+				return b, nil
 			}
 			continue
 		}
 		if strings.HasPrefix(line, "data:") {
-			data.WriteString(strings.TrimSpace(strings.TrimPrefix(line, "data:")))
+			if data.Len() > 0 {
+				data.WriteByte('\n')
+			}
+			data.WriteString(strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " "))
 		}
 	}
 	if err := sc.Err(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("mcp: read SSE response: %w", err)
 	}
-	if msg, ok := flush(); ok {
-		return msg, nil
+	if b, ok := flush(); ok {
+		return b, nil
 	}
-	return nil, fmt.Errorf("mcp: no JSON-RPC response in SSE stream")
+	return nil, fmt.Errorf("mcp: no matching JSON-RPC response in SSE stream")
 }

@@ -14,6 +14,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
+	"github.com/ongridio/ongrid/internal/pkg/toolcapture"
 	"github.com/ongridio/ongrid/internal/pkg/tracing"
 )
 
@@ -400,6 +401,7 @@ func (a *einoToolAdapter) InvokableRun(ctx context.Context, argumentsInJSON stri
 	// Persist at the adapter boundary instead of depending on the nested
 	// ToolsNode callback. The latter may omit Tool.OnEnd, leaving a valid tool
 	// execution represented as an auto-healed failure in chat history.
+	ctx = toolcapture.WithState(ctx)
 	a.resolveInfo(ctx)
 	resolved := einotool.GetImplSpecificOptions(&einoInvokeOptKey{}, opts...)
 	sink := a.persistence

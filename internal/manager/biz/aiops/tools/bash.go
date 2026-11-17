@@ -13,6 +13,7 @@ import (
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	devicebiz "github.com/ongridio/ongrid/internal/manager/biz/device"
 	edgebiz "github.com/ongridio/ongrid/internal/manager/biz/edge"
+	"github.com/ongridio/ongrid/internal/pkg/toolcapture"
 	"github.com/ongridio/ongrid/internal/pkg/tunnel"
 )
 
@@ -300,6 +301,10 @@ func (t *BashTool) singleBash(ctx context.Context, deviceID uint64, cmd string, 
 	entry.Stderr = resp.Stderr
 	entry.ExitCode = resp.ExitCode
 	entry.Truncated = resp.Truncated
+	if resp.Truncated {
+		// Capture the final batch envelope, but retain every host's truncation flag.
+		toolcapture.Raw(ctx, nil, true)
+	}
 	entry.DurationMs = resp.DurationMs
 	return entry
 }

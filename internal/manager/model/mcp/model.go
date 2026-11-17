@@ -50,7 +50,7 @@ type Server struct {
 
 	// ToolsCacheJSON is the JSON-encoded []mcpclient.Tool snapshot from the
 	// last successful probe. Status/LastError record that probe's outcome.
-	ToolsCacheJSON string `gorm:"type:text"`
+	ToolsCacheJSON string `gorm:"type:longtext"`
 	Status         string `gorm:"size:16"`
 	LastError      string `gorm:"size:512"`
 

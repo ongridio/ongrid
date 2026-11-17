@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
+	"github.com/ongridio/ongrid/internal/pkg/toolcapture"
 	"log/slog"
 	"sync"
 	"time"
@@ -815,6 +816,16 @@ func (h *PersistenceHandler) persistToolEnd(ctx context.Context, info *callbacks
 		h.recordErr("tool_call_update", err)
 	}
 	h.updateReplyToolCall(entry.rowID, status, resultPtr, errStr, endedAt)
+	_, resultID, _ := toolcapture.Get(ctx)
+	if resultID != "" {
+		if writer, ok := h.deps.Repo.(interface {
+			SetToolCallResultID(context.Context, string, string) error
+		}); ok {
+			if err := writer.SetToolCallResultID(writeCtx, entry.rowID, resultID); err != nil {
+				h.recordErr("tool_result_link", err)
+			}
+		}
+	}
 
 	// Append a role=tool message so history replay sees the tool
 	// result. Use the LLM-assigned call id (entry.llmCallID) when
@@ -844,6 +855,9 @@ func (h *PersistenceHandler) persistToolEnd(ctx context.Context, info *callbacks
 		ToolCallID: &tcallID,
 		ToolName:   &tname,
 		CreatedAt:  endedAt,
+	}
+	if resultID != "" {
+		row.ResultID = &resultID
 	}
 	if err := h.deps.Repo.AppendMessage(writeCtx, row); err != nil {
 		h.recordErr("tool_msg_insert", err)

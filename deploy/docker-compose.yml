@@ -65,6 +65,7 @@ services:
       ONGRID_DB_DSN: ${ONGRID_DB_DSN:-ongrid:ongrid@tcp(mysql:3306)/ongrid?parseTime=true&charset=utf8mb4&loc=Local}
       ONGRID_DB_MAX_OPEN_CONNS: ${ONGRID_DB_MAX_OPEN_CONNS:-50}
       ONGRID_DB_MAX_IDLE_CONNS: ${ONGRID_DB_MAX_IDLE_CONNS:-10}
+      ONGRID_TOOL_RESULTS_MAX_BYTES: ${ONGRID_TOOL_RESULTS_MAX_BYTES:-10737418240}
       ONGRID_JWT_SECRET: ${ONGRID_JWT_SECRET:-change-me-to-a-long-random-string}
       # HLD-017 credential vault at-rest key (AES-256-GCM); set 32+ random chars.
       ONGRID_SECRET_KEY: ${ONGRID_SECRET_KEY:-}
@@ -183,6 +184,7 @@ services:
       # Packet capture raw PCAP objects for local dev.
       - ../.cache/ongrid-packet-captures:/var/lib/ongrid/packet-captures
       - ../.cache/ongrid-chat-attachments:/var/lib/ongrid/chat-attachments
+      - ../.cache/ongrid-tool-results:/var/lib/ongrid/tool-results
     # ADR-008: HTTP API (8080) is no longer published to host in the
     # production-shape stack — nginx fronts it on 443/80. Metrics port
     # 9100 stays exposed for the host's Prometheus.

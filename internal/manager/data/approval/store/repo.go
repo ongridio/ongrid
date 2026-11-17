@@ -102,3 +102,7 @@ func (r *Repo) SetResult(ctx context.Context, id, status, resultJSON string, exe
 	return dbx.WithContext(ctx, r.db).Model(&model.Approval{}).Where("id = ?", id).
 		Updates(map[string]any{"status": status, "result_json": resultJSON, "executed_at": executedAt}).Error
 }
+
+func (r *Repo) SetStoredResult(ctx context.Context, id, status, resultJSON, resultID string, executedAt time.Time) error {
+	return dbx.WithContext(ctx, r.db).Model(&model.Approval{}).Where("id = ?", id).Updates(map[string]any{"status": status, "result_json": resultJSON, "result_id": resultID, "executed_at": executedAt}).Error
+}

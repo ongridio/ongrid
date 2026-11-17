@@ -14,6 +14,7 @@ package runner
 
 import (
 	"context"
+	"io"
 	"time"
 )
 
@@ -66,6 +67,8 @@ type Spec struct {
 	Workdir string
 
 	Stdin []byte
+	// StdinReader streams large inputs. Mutually exclusive with Stdin.
+	StdinReader io.Reader
 
 	// Timeout caps wall-clock; zero → DefaultTimeout.
 	Timeout time.Duration

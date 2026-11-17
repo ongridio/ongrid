@@ -11,6 +11,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/ongridio/ongrid/internal/manager/biz/toolresult"
+	resultmodel "github.com/ongridio/ongrid/internal/manager/model/toolresult"
+	"github.com/ongridio/ongrid/internal/pkg/toolcapture"
 	"log/slog"
 	"strings"
 	"sync"
@@ -41,6 +44,7 @@ type executorKey struct{ kind, runtimeVersion string }
 
 // Usecase is the inbox facade.
 type Usecase struct {
+	results    *toolresult.Usecase
 	authorizer Authorizer
 	executorMu sync.RWMutex
 	repo       Repo
@@ -133,6 +137,19 @@ func (u *Usecase) Approve(ctx context.Context, approverID uint64, id string) (*m
 	if err := u.AuthorizeApproval(ctx, approverID); err != nil {
 		return nil, err
 	}
+
+	if u.results != nil {
+		proposed, err := u.repo.Get(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if proposed.Source == model.SourceAgent && proposed.SessionID != "" {
+			if err = u.results.Preflight(ctx, toolresult.Scope{SessionID: proposed.SessionID, UserID: proposed.ProposedBy}); err != nil {
+				return nil, fmt.Errorf("result storage unavailable; approval was not executed: %w", err)
+			}
+		}
+	}
+	ctx = toolcapture.WithState(ctx)
 	now := time.Now().UTC()
 	if err := u.repo.Decide(ctx, id, map[string]any{
 		"status": model.StatusApproved, "approved_by": approverID, "decided_at": now,
@@ -164,7 +181,23 @@ func (u *Usecase) Approve(ctx context.Context, approverID uint64, id string) (*m
 		}
 		res = string(payload)
 	}
-	if err := u.repo.SetResult(ctx, id, status, res, time.Now().UTC()); err != nil {
+
+	if u.results != nil && a.Source == model.SourceAgent && a.SessionID != "" {
+		until := time.Now().UTC().Add(90 * 24 * time.Hour)
+		res = u.results.Capture(ctx, toolresult.Scope{SessionID: a.SessionID, UserID: a.ProposedBy}, "approval:"+a.ID, a.Kind, res, runErr, []resultmodel.Reference{{Kind: "approval", ID: a.ID, RetainUntil: &until}})
+		_, a.ResultID, _ = toolcapture.Get(ctx)
+	}
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	defer cancel()
+	var saveErr error
+	if writer, ok := u.repo.(interface {
+		SetStoredResult(context.Context, string, string, string, string, time.Time) error
+	}); ok {
+		saveErr = writer.SetStoredResult(writeCtx, id, status, res, a.ResultID, time.Now().UTC())
+	} else {
+		saveErr = u.repo.SetResult(writeCtx, id, status, res, time.Now().UTC())
+	}
+	if err := saveErr; err != nil {
 		return nil, fmt.Errorf("persist approval execution result: %w", err)
 	}
 	a, err = u.repo.Get(ctx, id)
@@ -210,3 +243,5 @@ func (u *Usecase) InvalidatePending(ctx context.Context, id, reason string) erro
 	}
 	return nil
 }
+
+func (u *Usecase) SetToolResults(results *toolresult.Usecase) { u.results = results }

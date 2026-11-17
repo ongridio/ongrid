@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -12,12 +13,23 @@ import (
 	"github.com/ongridio/ongrid/internal/pkg/logger"
 	"github.com/ongridio/ongrid/internal/pkg/notify"
 	"github.com/ongridio/ongrid/internal/pkg/prom"
+	"github.com/ongridio/ongrid/internal/pkg/resultanalysis"
 )
 
 // version is overwritten at build time via -ldflags.
 var version = "dev"
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == resultanalysis.WorkerArg {
+		if err := resultanalysis.Worker(os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			if errors.Is(err, resultanalysis.ErrOutputLimit) {
+				os.Exit(resultanalysis.OutputLimitExitCode)
+			}
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(); err != nil {
 		os.Exit(1)
 	}

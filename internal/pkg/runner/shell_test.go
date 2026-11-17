@@ -59,3 +59,14 @@ func TestShellRunnerOutputCap(t *testing.T) {
 		t.Fatalf("output not capped: len=%d truncated=%v", len(res.Stdout), res.Truncated)
 	}
 }
+
+func TestShellRunnerStreamsInput(t *testing.T) {
+	res, err := NewShellRunner().Run(context.Background(), Spec{Argv: []string{"/bin/cat"}, StdinReader: strings.NewReader("streamed input")})
+	if err != nil || res.Stdout != "streamed input" {
+		t.Fatalf("stream: %+v %v", res, err)
+	}
+	_, err = NewShellRunner().Run(context.Background(), Spec{Argv: []string{"/bin/cat"}, Stdin: []byte("one"), StdinReader: strings.NewReader("two")})
+	if err == nil {
+		t.Fatal("ambiguous stdin accepted")
+	}
+}

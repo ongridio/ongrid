@@ -452,3 +452,7 @@ func (r *SessionRepo) hydrateToolResults(ctx context.Context, msgs []*model.Mess
 	}
 	return nil
 }
+
+func (r *SessionRepo) SetToolCallResultID(ctx context.Context, id, resultID string) error {
+	return r.db.WithContext(ctx).Model(&model.ToolCall{}).Where("id = ?", id).Update("result_id", resultID).Error
+}

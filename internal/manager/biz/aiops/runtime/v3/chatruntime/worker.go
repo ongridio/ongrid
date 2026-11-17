@@ -42,6 +42,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/ongridio/ongrid/internal/manager/biz/toolresult"
 	"github.com/ongridio/ongrid/internal/pkg/tenantctx"
 	"strings"
 	"sync"
@@ -551,6 +552,9 @@ func (rt *Runtime) runWorker(ctx context.Context, agentDef *Agent, sessID, userT
 		handlers = callbacks.NewDefaultHandlers(deps)
 	}
 	cfg.ToolPersistence = callbacks.EnableSynchronousToolPersistence(handlers)
+	if rt.cfg.Results != nil && session != nil {
+		workerTools = rt.cfg.Results.BindTools(toolresult.Scope{SessionID: sessID, UserID: session.UserID}, workerTools)
+	}
 	g, err := graph.BuildReActGraph(rt.cfg.ChatModel, workerTools, cfg)
 	if err != nil {
 		return "", fmt.Errorf("chatruntime: build worker graph: %w", err)

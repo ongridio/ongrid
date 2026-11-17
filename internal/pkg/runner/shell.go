@@ -23,6 +23,9 @@ func NewShellRunner() *ShellRunner { return &ShellRunner{} }
 func (*ShellRunner) Isolation() Isolation { return IsolationNone }
 
 func (r *ShellRunner) Run(ctx context.Context, spec Spec) (Result, error) {
+	if len(spec.Stdin) > 0 && spec.StdinReader != nil {
+		return Result{}, fmt.Errorf("runner: provide either Stdin or StdinReader")
+	}
 	if len(spec.Argv) == 0 && spec.Script == "" {
 		return Result{}, fmt.Errorf("runner: empty spec (need Argv or Script)")
 	}
@@ -70,6 +73,8 @@ func (r *ShellRunner) Run(ctx context.Context, spec Spec) (Result, error) {
 
 	if len(spec.Stdin) > 0 {
 		cmd.Stdin = bytes.NewReader(spec.Stdin)
+	} else if spec.StdinReader != nil {
+		cmd.Stdin = spec.StdinReader
 	}
 	outBuf := &capBuffer{max: maxOut}
 	errBuf := &capBuffer{max: maxOut}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/ongridio/ongrid/internal/pkg/toolcapture"
 	"os"
 	"path/filepath"
 	"strings"
@@ -235,6 +236,7 @@ func (s CloudBashProposer) awaitDecision(ctx context.Context, id string) (string
 			}
 			switch a.Status {
 			case "executed", "failed":
+				toolcapture.Link(ctx, a.ResultID)
 				return approvalToolResult(a)
 			case "rejected":
 				return `{"status":"rejected","message":"The user rejected this command; it was not run. Do not retry it without new instructions."}`, nil
