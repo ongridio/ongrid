@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -120,16 +121,17 @@ func (u *Usecase) Open(ctx context.Context, scope Scope, id string) (*model.Resu
 }
 
 type View struct {
-	Kind            string `json:"kind"`
-	ResultID        string `json:"result_id,omitempty"`
-	Status          string `json:"status"`
-	ExecutionStatus string `json:"execution_status"`
-	CaptureStatus   string `json:"capture_status"`
-	StorageStatus   string `json:"storage_status"`
-	ViewStatus      string `json:"view_status"`
-	CapturedBytes   int64  `json:"captured_bytes"`
-	Preview         string `json:"preview,omitempty"`
-	Instruction     string `json:"instruction,omitempty"`
+	Operation       *basetool.Operation `json:"operation,omitempty"`
+	Kind            string              `json:"kind"`
+	ResultID        string              `json:"result_id,omitempty"`
+	Status          string              `json:"status"`
+	ExecutionStatus string              `json:"execution_status"`
+	CaptureStatus   string              `json:"capture_status"`
+	StorageStatus   string              `json:"storage_status"`
+	ViewStatus      string              `json:"view_status"`
+	CapturedBytes   int64               `json:"captured_bytes"`
+	Preview         string              `json:"preview,omitempty"`
+	Instruction     string              `json:"instruction,omitempty"`
 }
 
 func prefix(s string, n int) string {
@@ -205,6 +207,7 @@ func (u *Usecase) Capture(ctx context.Context, scope Scope, executionID, tool, o
 		instruction += " For whole-dataset questions, custom calculations, joins or nested formats, use analyze_tool_results to evaluate jq expressions over the complete saved inputs."
 	}
 	v := View{Kind: "tool_result", ResultID: row.ID, Status: status, ExecutionStatus: executionStatus, CaptureStatus: row.CaptureStatus, StorageStatus: "ready", ViewStatus: "excerpt", CapturedBytes: int64(len(raw)), Preview: prefix(string(raw), 2048), Instruction: instruction}
+	v.Operation = captureOperation(tool, output)
 	if err != nil {
 		u.log.Error("tool result persistence failed", slog.String("result_id", row.ID), slog.Any("err", err))
 		v.StorageStatus = "failed"
@@ -273,3 +276,35 @@ func (u *Usecase) Reference(ctx context.Context, ref model.Reference) error {
 // SetCaptureEnabled is called only during startup; existing evidence remains readable.
 func (u *Usecase) SetCaptureEnabled(enabled bool) { u.captureEnabled = enabled }
 func (u *Usecase) CaptureEnabled() bool           { return u.captureEnabled }
+
+// Only the internal capture tool may carry UI controls into a bounded view.
+func captureOperation(tool, output string) *basetool.Operation {
+	if tool != "capture_pcap" {
+		return nil
+	}
+	var envelope struct {
+		Operation *basetool.Operation `json:"operation"`
+	}
+	if json.Unmarshal([]byte(output), &envelope) != nil || envelope.Operation == nil {
+		return nil
+	}
+	op := envelope.Operation
+	if op.Kind != "packet_capture_session" || len(op.ID) == 0 || len(op.ID) > 128 {
+		return nil
+	}
+	op.State, op.Title, op.Summary = prefix(op.State, 32), prefix(op.Title, 128), prefix(op.Summary, 256)
+	detail := op.Links["detail"]
+	op.Links = nil
+	if len(detail) <= 256 && strings.HasPrefix(detail, "/artifacts/packet-sessions/") {
+		op.Links = map[string]string{"detail": detail}
+	}
+	actions := op.Actions
+	op.Actions = nil
+	for _, action := range actions {
+		if action.Kind == "cancel" {
+			op.Actions = []basetool.OperationAction{{Kind: "cancel", Label: "Stop", Enabled: action.Enabled}}
+			break
+		}
+	}
+	return op
+}

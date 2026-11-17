@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -179,5 +180,51 @@ func TestTextSearchBoundedAndUTF8Safe(t *testing.T) {
 	}
 	if strings.Contains(string(b), "�") {
 		t.Fatal("UTF-8 split")
+	}
+}
+
+func TestLargeCapturePreservesOperationControls(t *testing.T) {
+	u, _, _, scope := fixture(t)
+	operation := map[string]any{"kind": "packet_capture_session", "id": "op-test", "state": "running", "title": "Capture", "summary": "Collecting ten rounds", "links": map[string]string{"detail": "/artifacts/packet-sessions/session-test"}, "actions": []map[string]any{{"kind": "cancel", "label": "Stop", "enabled": true}}}
+	raw, err := json.Marshal(map[string]any{"operation": operation, "captures": strings.Repeat("packet data", 1000)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range []string{"capture_pcap", "external_tool"} {
+		ctx := toolcapture.WithState(context.Background())
+		output := u.Capture(ctx, scope, uuid.NewString(), tool, string(raw), nil, nil)
+		if len(output) > biz.ViewLimit {
+			t.Fatalf("unbounded view: %d", len(output))
+		}
+		var view struct {
+			ResultID  string         `json:"result_id"`
+			Operation map[string]any `json:"operation"`
+		}
+		if err := json.Unmarshal([]byte(output), &view); err != nil {
+			t.Fatal(err)
+		}
+		if view.ResultID == "" {
+			t.Fatal("result was not saved")
+		}
+		if tool == "external_tool" {
+			if view.Operation != nil {
+				t.Fatal("untrusted output supplied UI controls")
+			}
+			continue
+		}
+		got, _ := json.Marshal(view.Operation)
+		want, _ := json.Marshal(operation)
+		if string(got) != string(want) {
+			t.Fatalf("operation changed: %s", got)
+		}
+		_, file, err := u.Open(ctx, scope, view.ResultID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		saved, err := io.ReadAll(file)
+		file.Close()
+		if err != nil || string(saved) != string(raw) {
+			t.Fatal("saved evidence changed")
+		}
 	}
 }

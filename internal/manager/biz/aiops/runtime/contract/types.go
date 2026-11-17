@@ -32,6 +32,7 @@ type MentionResolver interface {
 type EventType string
 
 const (
+	EventContextUsage EventType = "context_usage"
 	// EventAssistant fires after every assistant turn is persisted.
 	EventAssistant EventType = "assistant"
 	// EventToolStart fires after a tool_call row is persisted as
@@ -78,6 +79,7 @@ type ToolEvent struct {
 // terminal state. The SPA / SSE adapter renders it as a separate frame
 // type next to assistant / tool / done.
 type Event struct {
+	ContextUsage *llm.ContextUsage
 	Type         EventType
 	Assistant    *AssistantEvent
 	Tool         *ToolEvent

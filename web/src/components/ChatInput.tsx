@@ -1,4 +1,6 @@
 import { Button, Label, Textarea } from '@/components/ui';
+import { ContextUsageIndicator } from '@/components/ContextUsageIndicator';
+import type { ContextUsage } from '@/api/chat';
 import { ModelDropdown, WebSearchToggle } from '@/components/ChatModelControls';
 import {
   useEffect,
@@ -60,6 +62,7 @@ type Props = {
   // Multi-model selector. The dropdown is always interactive — when
   // providers is empty, clicking it opens a panel that points at the
   // settings/integrations page (no more dead "ongrid" placeholder chip).
+  contextUsage?: ContextUsage | null;
   providers?: LLMProvider[];
   selectedModel?: ModelSelection | null;
   onModelChange?(m: ModelSelection): void;
@@ -90,6 +93,7 @@ export function ChatInput({
   className,
   providers,
   selectedModel,
+  contextUsage,
   onModelChange,
   webSearchEnabled,
   onWebSearchToggle,
@@ -476,6 +480,7 @@ export function ChatInput({
               onPick={onModelChange}
               disabled={disabled}
             />
+            <ContextUsageIndicator providers={providers ?? []} selected={selectedModel ?? null} usage={contextUsage} />
             <WebSearchToggle
               enabled={!!webSearchEnabled}
               onToggle={(v) => onWebSearchToggle?.(v)}

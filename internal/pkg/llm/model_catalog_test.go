@@ -73,17 +73,17 @@ func TestCatalogCacheCoalescesRetainsAndRotates(t *testing.T) {
 	var wg sync.WaitGroup
 	for range 12 {
 		wg.Add(1)
-		go func() { defer wg.Done(); d.capabilities(context.Background(), p) }()
+		go func() { defer wg.Done(); d.models(context.Background(), p) }()
 	}
 	wg.Wait()
 	require.EqualValues(t, 1, calls.Load())
 	fail.Store(true)
 	d.entries[p.ID].nextFetch = time.Time{}
-	require.Contains(t, d.capabilities(context.Background(), p), "future")
-	require.Contains(t, d.capabilities(context.Background(), p), "future")
+	require.Contains(t, d.models(context.Background(), p), "future")
+	require.Contains(t, d.models(context.Background(), p), "future")
 	require.EqualValues(t, 2, calls.Load())
 	p.APIKey = "rotated"
-	require.Nil(t, d.capabilities(context.Background(), p))
+	require.Nil(t, d.models(context.Background(), p))
 	require.EqualValues(t, 3, calls.Load())
 }
 

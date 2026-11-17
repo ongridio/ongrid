@@ -94,8 +94,9 @@ func WithReasoningEffort(effort string) model.Option {
 //
 // Reference: +
 type RoutingChatModel struct {
-	inner           map[string]model.ChatModel
-	defaultProvider string
+	contextBudgetResolver func(context.Context, string, string, ContextBudget) ContextBudget
+	inner                 map[string]model.ChatModel
+	defaultProvider       string
 	// defaultResolver, when non-nil, supplies the LIVE configured default
 	// provider and its model for calls that omit WithProvider — so a runtime
 	// change to the configured default (the home-page model picker writing
@@ -113,8 +114,9 @@ type RoutingChatModel struct {
 // least DefaultProvider. DefaultProvider is the fallback used when a call
 // omits WithProvider; it must be a key in Inner.
 type RoutingChatModelConfig struct {
-	Inner           map[string]model.ChatModel
-	DefaultProvider string
+	ContextBudgetResolver func(context.Context, string, string, ContextBudget) ContextBudget
+	Inner                 map[string]model.ChatModel
+	DefaultProvider       string
 	// DefaultResolver is optional; see RoutingChatModel.defaultResolver. When
 	// set, it overrides DefaultProvider per-call for calls that omit
 	// WithProvider, letting the configured default change live.
@@ -142,9 +144,10 @@ func NewRoutingChatModel(cfg RoutingChatModelConfig) (*RoutingChatModel, error) 
 		cp[k] = v
 	}
 	return &RoutingChatModel{
-		inner:           cp,
-		defaultProvider: cfg.DefaultProvider,
-		defaultResolver: cfg.DefaultResolver,
+		contextBudgetResolver: cfg.ContextBudgetResolver,
+		inner:                 cp,
+		defaultProvider:       cfg.DefaultProvider,
+		defaultResolver:       cfg.DefaultResolver,
 	}, nil
 }
 
@@ -238,7 +241,7 @@ func (r *RoutingChatModel) BindTools(tools []*schema.ToolInfo) error {
 // kernel (PR-9) to wire cleanly.
 func (r *RoutingChatModel) WithTools(tools []*schema.ToolInfo) (model.ToolCallingChatModel, error) {
 	cp := &RoutingChatModel{
-		inner:           make(map[string]model.ChatModel, len(r.inner)),
+		contextBudgetResolver: r.contextBudgetResolver, inner: make(map[string]model.ChatModel, len(r.inner)),
 		defaultProvider: r.defaultProvider,
 		defaultResolver: r.defaultResolver,
 	}

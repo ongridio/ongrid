@@ -24,6 +24,7 @@ const anthropicAPIVersion = "2026-10-21"
 type CatalogModel struct {
 	ID        string
 	Reasoning *ReasoningCapability
+	Limits    *ModelLimits
 }
 
 // FetchModelCatalog keeps optional metadata that OpenAI-compatible SDK structs
@@ -111,7 +112,7 @@ func FetchModelCatalog(ctx context.Context, provider string, cfg Config) ([]Cata
 			if err != nil {
 				return nil, fmt.Errorf("invalid model reasoning metadata: %w", err)
 			}
-			models = append(models, CatalogModel{ID: id, Reasoning: capability})
+			models = append(models, CatalogModel{ID: id, Reasoning: capability, Limits: item.limits()})
 		}
 		if !payload.HasMore {
 			return models, nil
@@ -128,6 +129,15 @@ type capabilitySupport struct {
 	Supported bool `json:"supported"`
 }
 type catalogModelJSON struct {
+	ContextWindow   int `json:"context_window"`
+	ContextLength   int `json:"context_length"`
+	MaxInputTokens  int `json:"max_input_tokens"`
+	MaxTokens       int `json:"max_tokens"`
+	MaxOutputTokens int `json:"max_output_tokens"`
+	TopProvider     *struct {
+		ContextLength       int `json:"context_length"`
+		MaxCompletionTokens int `json:"max_completion_tokens"`
+	} `json:"top_provider"`
 	ID     string `json:"id"`
 	Effort *struct {
 		Levels       []string `json:"supported_levels"`
@@ -153,6 +163,31 @@ type catalogModelJSON struct {
 			} `json:"types"`
 		} `json:"thinking"`
 	} `json:"capabilities"`
+}
+
+func (m catalogModelJSON) limits() *ModelLimits {
+	limits := ModelLimits{Window: m.ContextWindow, MaxOutput: m.MaxOutputTokens}
+	if limits.Window == 0 {
+		limits.Window = m.ContextLength
+	}
+	if limits.Window == 0 {
+		limits.Window = m.MaxInputTokens
+	}
+	if limits.MaxOutput == 0 {
+		limits.MaxOutput = m.MaxTokens
+	}
+	if m.TopProvider != nil {
+		if m.TopProvider.ContextLength > 0 {
+			limits.Window = m.TopProvider.ContextLength
+		}
+		if m.TopProvider.MaxCompletionTokens > 0 {
+			limits.MaxOutput = m.TopProvider.MaxCompletionTokens
+		}
+	}
+	if !validModelLimits(limits) {
+		return nil
+	}
+	return &limits
 }
 
 func (m catalogModelJSON) reasoning(provider string) (*ReasoningCapability, error) {
@@ -213,10 +248,10 @@ func (m catalogModelJSON) reasoning(provider string) (*ReasoningCapability, erro
 }
 
 type reasoningDiscoveryEntry struct {
-	fingerprint  [32]byte
-	capabilities map[string]ReasoningCapability
-	nextFetch    time.Time
-	fetching     chan struct{}
+	fingerprint [32]byte
+	models      map[string]CatalogModel
+	nextFetch   time.Time
+	fetching    chan struct{}
 }
 
 // ReasoningDiscovery keeps one bounded cache entry per configured provider.
@@ -226,7 +261,7 @@ type ReasoningDiscovery struct {
 	entries map[string]*reasoningDiscoveryEntry
 }
 
-func (d *ReasoningDiscovery) capabilities(ctx context.Context, p ProviderConfig) map[string]ReasoningCapability {
+func (d *ReasoningDiscovery) models(ctx context.Context, p ProviderConfig) map[string]CatalogModel {
 	fingerprint := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%t", p.BaseURL, p.APIKey, p.TLSInsecure)))
 	d.mu.Lock()
 	if d.entries == nil {
@@ -237,8 +272,8 @@ func (d *ReasoningDiscovery) capabilities(ctx context.Context, p ProviderConfig)
 		entry = &reasoningDiscoveryEntry{fingerprint: fingerprint}
 		d.entries[p.ID] = entry
 	}
-	if time.Now().Before(entry.nextFetch) || (entry.fetching != nil && entry.capabilities != nil) {
-		cached := entry.capabilities
+	if time.Now().Before(entry.nextFetch) || (entry.fetching != nil && entry.models != nil) {
+		cached := entry.models
 		d.mu.Unlock()
 		return cached
 	}
@@ -251,7 +286,7 @@ func (d *ReasoningDiscovery) capabilities(ctx context.Context, p ProviderConfig)
 		case <-done:
 		}
 		d.mu.Lock()
-		cached := entry.capabilities
+		cached := entry.models
 		d.mu.Unlock()
 		return cached
 	}
@@ -261,11 +296,9 @@ func (d *ReasoningDiscovery) capabilities(ctx context.Context, p ProviderConfig)
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if err == nil {
-		entry.capabilities = make(map[string]ReasoningCapability)
+		entry.models = make(map[string]CatalogModel)
 		for _, model := range models {
-			if model.Reasoning != nil {
-				entry.capabilities[model.ID] = *model.Reasoning
-			}
+			entry.models[model.ID] = model
 		}
 		entry.nextFetch = time.Now().Add(time.Hour + time.Duration(rand.IntN(300))*time.Second)
 	} else {
@@ -275,10 +308,16 @@ func (d *ReasoningDiscovery) capabilities(ctx context.Context, p ProviderConfig)
 	}
 	close(entry.fetching)
 	entry.fetching = nil
-	return entry.capabilities
+	return entry.models
 }
 
-func providerReasoning(p ProviderConfig, discovered map[string]ReasoningCapability) map[string]ReasoningCapability {
+func providerReasoning(p ProviderConfig, catalog map[string]CatalogModel) map[string]ReasoningCapability {
+	discovered := make(map[string]ReasoningCapability, len(catalog))
+	for id, item := range catalog {
+		if item.Reasoning != nil {
+			discovered[id] = *item.Reasoning
+		}
+	}
 	capabilities := make(map[string]ReasoningCapability, len(p.Models)+1)
 	for _, model := range append(slices.Clone(p.Models), p.Model) {
 		if model != "" {

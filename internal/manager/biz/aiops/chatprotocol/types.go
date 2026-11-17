@@ -21,6 +21,7 @@ type Reply struct {
 type EventType string
 
 const (
+	EventContextUsage EventType = "context_usage"
 	// EventAssistant fires after every assistant turn is persisted. For
 	// tool-calling turns Content is empty but PendingToolCalls is non-zero
 	// — the UI should render placeholders for that many tool calls.
@@ -44,6 +45,7 @@ const (
 // Event is the streaming envelope. Exactly one of the optional pointer
 // fields is set, depending on Type.
 type Event struct {
+	ContextUsage *llm.ContextUsage
 	Type         EventType
 	Assistant    *AssistantEvent
 	Tool         *ToolEvent

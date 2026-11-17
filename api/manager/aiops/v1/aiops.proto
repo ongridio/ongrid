@@ -211,7 +211,19 @@ message StreamChunk {
         ToolCallResult tool_call_result = 3;
         // 整个会话收敛完毕，携带最终用量。
         Done done = 4;
+        ContextUsage context_usage = 5;
     }
+}
+
+// Latest prepared model request; estimated input includes tools and protocol headroom.
+message ContextUsage {
+    string provider = 1 [json_name = "provider"];
+    string model = 2 [json_name = "model"];
+    uint32 window = 3 [json_name = "window"];
+    uint32 input_tokens = 4 [json_name = "input_tokens"];
+    uint32 output_tokens = 5 [json_name = "output_tokens"];
+    string source = 6 [json_name = "source"];
+    bool trimmed = 7 [json_name = "trimmed"];
 }
 
 message ContentDelta {

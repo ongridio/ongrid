@@ -34,3 +34,14 @@ it('drops stale effort for models whose capability no longer supports it', () =>
   expect(modelSelectionForCatalog(selection, [provider])).toEqual({ ...selection, reasoning_effort: '' });
   expect(modelSelectionForCatalog(selection, [])).toEqual(selection);
 });
+
+
+it('dispatches per-request context usage separately from accumulated billing usage', async () => {
+  const usage = { provider: 'custom', model: 'alias', window: 32768, input_tokens: 15000, output_tokens: 4096, source: 'provider', trimmed: true };
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('event: context_usage\ndata: ' + JSON.stringify(usage) + '\n\nevent: done\ndata: {}\n\n')));
+  const onContextUsage = vi.fn();
+  const onDone = vi.fn();
+  await streamMessage('session', 'question', { onContextUsage, onDone });
+  expect(onContextUsage).toHaveBeenCalledWith(usage);
+  expect(onDone).toHaveBeenCalledTimes(1);
+});

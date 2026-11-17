@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/cloudwego/eino/schema"
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/contract"
 	"strings"
 	"testing"
 
@@ -84,5 +86,25 @@ func TestRuntimeBudgetErrorsPersistAndEmitDistinctMessages(t *testing.T) {
 				t.Fatal("missing error reply or done event")
 			}
 		})
+	}
+}
+
+func TestRuntimeEmitsPreparedContextUsage(t *testing.T) {
+	sess := &aiopsmodel.Session{ID: "usage", UserID: 7}
+	rt, err := NewRuntime(Config{Sessions: newMemSessions(sess), ChatModel: newScriptedChatModel(schema.AssistantMessage("done", nil))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var usage *llm.ContextUsage
+	_, err = rt.Handle(context.Background(), &Request{SessionID: sess.ID, UserID: 7, Provider: "custom", Model: "alias", UserText: "question", Emit: func(ev Event) {
+		if ev.Type == contract.EventContextUsage {
+			usage = ev.ContextUsage
+		}
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage == nil || usage.Model != "alias" || usage.Provider != "custom" || usage.Window != 131072 || usage.InputTokens <= 4096 || usage.OutputTokens != 8192 {
+		t.Fatalf("missing or invalid context estimate: %+v", usage)
 	}
 }

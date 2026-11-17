@@ -91,7 +91,7 @@ func buildAIOpsRuntime(
 	humanApproval aiopstoolsdec.HumanApprovalProposer,
 	traceCallback *aiopsgraphcb.TraceHandler,
 ) (*aiopschatruntime.Runtime, error) {
-	chatModel, err := buildRuntimeChatModel(ctx, cfg, llmClient, resolver, log)
+	chatModel, err := buildRuntimeChatModel(ctx, cfg, llmClient, llmRouter, resolver, log)
 	if err != nil {
 		return nil, err
 	}
@@ -237,7 +237,7 @@ func buildAIOpsRuntime(
 }
 
 // buildRuntimeChatModel shares provider configuration, not version-local execution state.
-func buildRuntimeChatModel(ctx context.Context, cfg *config.Config, llmClient llm.Client, resolver *managerbizsetting.LLMSettingsResolver, log *slog.Logger) (einomodel.ToolCallingChatModel, error) {
+func buildRuntimeChatModel(ctx context.Context, cfg *config.Config, llmClient llm.Client, llmRouter *llm.MultiClient, resolver *managerbizsetting.LLMSettingsResolver, log *slog.Logger) (einomodel.ToolCallingChatModel, error) {
 	// 1. RoutingChatModel — one inner per provider that exists. We
 	//    layer managersvcaiops.ProviderClient around the existing
 	//    llmRouter so each inner ChatModel routes its Chat() call
@@ -333,10 +333,15 @@ func buildRuntimeChatModel(ctx context.Context, cfg *config.Config, llmClient ll
 	if resolver != nil {
 		defaultResolver = resolver.DefaultModel
 	}
+	var budgetResolver func(context.Context, string, string, llm.ContextBudget) llm.ContextBudget
+	if llmRouter != nil {
+		budgetResolver = llmRouter.ContextBudget
+	}
 	chatModel, err := llm.NewRoutingChatModel(llm.RoutingChatModelConfig{
-		Inner:           innerModels,
-		DefaultProvider: defProv,
-		DefaultResolver: defaultResolver,
+		ContextBudgetResolver: budgetResolver,
+		Inner:                 innerModels,
+		DefaultProvider:       defProv,
+		DefaultResolver:       defaultResolver,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("chatruntime: NewRoutingChatModel: %w", err)

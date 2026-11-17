@@ -663,9 +663,10 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (result *Reply, ret
 	//     model. When both are empty no option is added (default path
 	//     unchanged).
 	invokeOpts := []compose.Option{compose.WithCallbacks(handlers...)}
-	if mopts := chatModelOpts(req); len(mopts) > 0 {
-		invokeOpts = append(invokeOpts, compose.WithChatModelOption(mopts...))
-	}
+	mopts := append(chatModelOpts(req), llm.WithContextUsageObserver(func(usage llm.ContextUsage) {
+		emit(Event{Type: contract.EventContextUsage, ContextUsage: &usage})
+	}))
+	invokeOpts = append(invokeOpts, compose.WithChatModelOption(mopts...))
 	invokeOpts = append(invokeOpts, compose.WithToolsNodeOption(
 		compose.WithToolOption(
 			graph.WithInvokeOpts(

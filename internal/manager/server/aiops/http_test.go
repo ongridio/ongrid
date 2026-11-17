@@ -567,3 +567,36 @@ func TestMessageDTOIncludesPersistedToolExecution(t *testing.T) {
 		t.Fatalf("DTO=%+v", out.ToolCall)
 	}
 }
+
+type contextModelCatalog struct{}
+
+func (contextModelCatalog) Providers() []llm.ProviderInfo {
+	return []llm.ProviderInfo{{ID: "custom", Model: "alias", Models: []string{"alias", "unknown"}, ContextLimits: map[string]llm.ModelLimits{"alias": {Window: 32000, MaxOutput: 2048}}}}
+}
+func (contextModelCatalog) Default() (string, string) { return "custom", "alias" }
+
+func TestModelCatalogAndSSEContextBudget(t *testing.T) {
+	h := &Handler{catalog: contextModelCatalog{}, contextBudget: llm.ContextBudget{Window: 64000, Output: 8192}}
+	r := httptest.NewRequest(http.MethodGet, "/v1/aiops/models", nil)
+	r = r.WithContext(tenantctx.With(r.Context(), tenantctx.Tenant{UserID: 7, Role: "user"}))
+	w := httptest.NewRecorder()
+	h.listModels(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d", w.Code)
+	}
+	var result struct {
+		Providers []struct {
+			Budgets map[string]llm.ContextBudget `json:"context_budgets"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Providers) != 1 || result.Providers[0].Budgets["alias"].Window != 32000 || result.Providers[0].Budgets["alias"].Output != 2048 || result.Providers[0].Budgets["unknown"].Window != 64000 {
+		t.Fatalf("bad budgets: %s", w.Body.String())
+	}
+	usage := &llm.ContextUsage{Provider: "custom", Model: "alias", Window: 32000, InputTokens: 10000, OutputTokens: 2048, Source: "provider"}
+	if eventName(chatprotocol.EventContextUsage) != "context_usage" || eventPayload("session", chatprotocol.Event{Type: chatprotocol.EventContextUsage, ContextUsage: usage}) != usage {
+		t.Fatal("context usage lost in SSE")
+	}
+}

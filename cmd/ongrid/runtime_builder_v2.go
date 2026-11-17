@@ -89,7 +89,7 @@ func buildV2AIOpsRuntime(
 	humanApproval aiopstoolsdec.HumanApprovalProposer,
 	traceCallback einocallbacks.Handler,
 ) (*aiopschatruntime.Runtime, error) {
-	chatModel, err := buildRuntimeChatModel(ctx, cfg, llmClient, resolver, log)
+	chatModel, err := buildRuntimeChatModel(ctx, cfg, llmClient, llmRouter, resolver, log)
 	if err != nil {
 		return nil, err
 	}

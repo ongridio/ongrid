@@ -240,7 +240,19 @@ export type ReasoningCapability = {
   default_level?: string;
 };
 
+export type ContextBudget = { window: number; output: number; source: 'provider' | 'builtin' | 'global' };
+export type ContextUsage = {
+  provider: string;
+  model: string;
+  window: number;
+  input_tokens: number;
+  output_tokens: number;
+  source: ContextBudget['source'];
+  trimmed: boolean;
+};
+
 export type LLMProvider = {
+  context_budgets?: Record<string, ContextBudget>;
   reasoning_capabilities?: Record<string, ReasoningCapability>;
   reasoning_efforts?: Record<string, string[]>;
   id: string;
@@ -325,6 +337,7 @@ export type ApprovalPendingStreamEvent = {
 export class RejectedChatTurnError extends ApiError {}
 
 export type StreamCallbacks = {
+  onContextUsage?: (usage: ContextUsage) => void;
   onAssistant?: (e: AssistantStreamEvent) => void;
   onToolStart?: (e: ToolStreamEvent) => void;
   onToolEnd?: (e: ToolStreamEvent) => void;
@@ -424,6 +437,9 @@ function dispatchFrame(raw: string, cbs: StreamCallbacks) {
     return;
   }
   switch (event) {
+    case 'context_usage':
+      cbs.onContextUsage?.(payload as ContextUsage);
+      break;
     case 'assistant':
       cbs.onAssistant?.(payload as AssistantStreamEvent);
       break;

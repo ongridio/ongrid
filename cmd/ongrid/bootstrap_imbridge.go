@@ -5,6 +5,7 @@ import (
 	managerapprovaldata "github.com/ongridio/ongrid/internal/manager/data/approval/store"
 	managersvcimbridge "github.com/ongridio/ongrid/internal/manager/service/imbridge"
 	"github.com/ongridio/ongrid/internal/pkg/config"
+	"github.com/ongridio/ongrid/internal/pkg/llm"
 	"github.com/prometheus/client_golang/prometheus"
 	"log/slog"
 	"os"
@@ -104,6 +105,7 @@ func bootstrapIMBridge(rootCtx context.Context, cfg *config.Config, log *slog.Lo
 	// list; the handler reads from it via a narrow interface so wiring
 	// stays one-way.
 	runtime.aiopsHandler.SetModelCatalog(models.llmRouter)
+	runtime.aiopsHandler.SetContextBudget(llm.ContextBudget{Window: cfg.LLM.ContextWindow, Output: cfg.LLM.OutputTokens})
 	// LLM client for /v1/aiops/query-translate (NL → LogQL/TraceQL/PromQL).
 	// Optional helper — endpoint 503s when nil; SPA hides the ✨ button.
 	runtime.aiopsHandler.SetLLMClient(models.llmClient)
