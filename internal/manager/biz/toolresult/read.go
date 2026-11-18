@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -40,20 +42,21 @@ type Item struct {
 	Fragment bool   `json:"fragment,omitempty"`
 }
 type Page struct {
-	ResultID      string `json:"result_id"`
-	CaptureStatus string `json:"capture_status"`
-	StorageStatus string `json:"storage_status"`
-	Mode          string `json:"mode"`
-	Items         []Item `json:"items"`
-	NextCursor    string `json:"next_cursor,omitempty"`
-	ScannedBytes  int64  `json:"scanned_bytes"`
-	ScanStart     int64  `json:"scan_start"`
-	ScanEnd       int64  `json:"scan_end"`
-	ScanComplete  bool   `json:"scan_complete"`
-	Count         int64  `json:"count"`
-	CountExact    bool   `json:"count_exact"`
-	CountScope    string `json:"count_scope"`
-	Notice        string `json:"notice,omitempty"`
+	ResultID       string `json:"result_id"`
+	CaptureStatus  string `json:"capture_status"`
+	StorageStatus  string `json:"storage_status"`
+	Mode           string `json:"mode"`
+	Items          []Item `json:"items"`
+	NextCursor     string `json:"next_cursor,omitempty"`
+	ScannedBytes   int64  `json:"scanned_bytes"`
+	ScanStart      int64  `json:"scan_start"`
+	ScanEnd        int64  `json:"scan_end"`
+	ScanComplete   bool   `json:"scan_complete"`
+	Count          int64  `json:"count"`
+	CountExact     bool   `json:"count_exact"`
+	CountScope     string `json:"count_scope"`
+	Notice         string `json:"notice,omitempty"`
+	indexExhausted bool
 }
 
 func (u *Usecase) Read(ctx context.Context, scope Scope, req Request, query bool) (*Page, error) {
@@ -66,7 +69,7 @@ func (u *Usecase) Read(ctx context.Context, scope Scope, req Request, query bool
 	if req.Start < 0 || req.Limit < 1 || req.Limit > 200 || len(req.Fields) > 32 || len(req.Contains) > 512 || len(req.EqualsJSON) > 1024 || (req.Cursor != "" && req.Start != 0) {
 		return nil, errs.ErrInvalid
 	}
-	if req.Mode != "bytes" && req.Mode != "lines" && req.Mode != "json" {
+	if req.Mode != "bytes" && req.Mode != "lines" && req.Mode != "json" && req.Mode != "structure" {
 		return nil, errs.ErrInvalid
 	}
 	if !query && (req.Contains != "" || len(req.EqualsJSON) > 0 || req.Count) {
@@ -77,6 +80,20 @@ func (u *Usecase) Read(ctx context.Context, scope Scope, req Request, query bool
 	}
 	if len(req.EqualsJSON) > 0 && !json.Valid([]byte(req.EqualsJSON)) {
 		return nil, errs.ErrInvalid
+	}
+	for _, path := range append(slices.Clone(req.Fields), req.Collection, req.FilterPointer) {
+		if len(path) > 1024 || !resultfile.ValidPointer(path) {
+			return nil, fmt.Errorf("%w: invalid JSON pointer; use an empty root pointer or a slash-prefixed path with ~0 and ~1 escapes", errs.ErrInvalid)
+		}
+	}
+	if req.FilterPointer != "" && req.EqualsJSON == "" {
+		return nil, fmt.Errorf("%w: filter_pointer requires equals_json", errs.ErrInvalid)
+	}
+	if req.Mode == "structure" && (req.Contains != "" || req.Count) {
+		return nil, fmt.Errorf("%w: structure lists saved paths; use json or lines for queries", errs.ErrInvalid)
+	}
+	if req.Count && req.Mode == "bytes" && req.Contains == "" {
+		return nil, fmt.Errorf("%w: use contains to count text matches, or lines to count lines", errs.ErrInvalid)
 	}
 	row, err := u.Metadata(ctx, scope, req.ResultID)
 	if err != nil {
@@ -108,9 +125,12 @@ func (u *Usecase) Read(ctx context.Context, scope Scope, req Request, query bool
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	p := &Page{ResultID: row.ID, CaptureStatus: row.CaptureStatus, StorageStatus: row.StorageStatus, Mode: req.Mode, Items: []Item{}, ScanStart: offset, ScanEnd: offset, CountScope: "scanned_range_only"}
-	if req.Mode == "json" {
+	switch req.Mode {
+	case "structure":
+		err = u.structurePage(ctx, row, req, offset, p)
+	case "json":
 		err = u.jsonPage(ctx, row, req, offset, p)
-	} else {
+	default:
 		err = u.textPage(ctx, row, req, offset, p, query)
 	}
 	if parentCtx.Err() != nil {
@@ -123,11 +143,61 @@ func (u *Usecase) Read(ctx context.Context, scope Scope, req Request, query bool
 	if err != nil {
 		return nil, err
 	}
-	if !p.ScanComplete {
+	if !p.ScanComplete && !p.indexExhausted {
+		if p.ScanEnd == p.ScanStart {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			return nil, fmt.Errorf("result page made no progress; check the start offset or use a different mode")
+		}
 		p.NextCursor = u.continuation(row, fingerprint, p.ScanEnd)
 	}
 	p.CountExact = p.ScanComplete && p.ScanStart == 0 && p.CaptureStatus == "complete" && p.Notice == ""
+	if isMCPResult(row.ToolName) && req.Mode == "json" && req.Collection == "/content" {
+		p.Notice = strings.TrimSpace(p.Notice + " " + mcpBlocksNotice)
+	}
 	return p, nil
+}
+
+func (u *Usecase) structurePage(ctx context.Context, row *model.Result, req Request, offset int64, p *Page) error {
+	idx, err := u.repo.Index(ctx, row)
+	if err != nil {
+		return err
+	}
+	paths := sortedPointers(append(slices.Collect(maps.Keys(idx.Collections)), idx.TextPointers...))
+	if offset > int64(len(paths)) {
+		return errs.ErrInvalid
+	}
+	for i := offset; i < int64(len(paths)); i++ {
+		kind := "text"
+		if _, ok := idx.Collections[paths[i]]; ok {
+			kind = "array"
+		}
+		descriptor, err := json.Marshal(struct {
+			Kind    string `json:"kind"`
+			Pointer string `json:"pointer"`
+		}{kind, paths[i]})
+		if err != nil {
+			return err
+		}
+		item := Item{Start: i, End: i + 1, JSON: string(descriptor)}
+		if !fits(p, item) {
+			if len(p.Items) > 0 {
+				break
+			}
+			item.JSON = ""
+			item.Text = "Path exceeds the tool response limit."
+			item.Fragment = true
+		}
+		p.Items = append(p.Items, item)
+		p.ScanEnd = i + 1
+		p.Count++
+		if len(p.Items) == req.Limit {
+			break
+		}
+	}
+	p.ScanComplete = p.ScanEnd == int64(len(paths))
+	return nil
 }
 
 func fits(p *Page, item Item) bool {
@@ -145,7 +215,8 @@ func (u *Usecase) jsonPage(ctx context.Context, row *model.Result, req Request, 
 	}
 	col, ok := idx.Collections[req.Collection]
 	if !ok {
-		return fmt.Errorf("%w: structured_query_unavailable; use bytes mode", errs.ErrInvalid)
+		paths := visiblePointers(slices.Collect(maps.Keys(idx.Collections)))
+		return fmt.Errorf("%w: structured_query_unavailable for collection_pointer %q; indexed arrays include %q; use structure to list paths or bytes for unindexed data", errs.ErrInvalid, req.Collection, paths)
 	}
 	if offset > int64(len(col.Items)) {
 		return errs.ErrInvalid
@@ -172,6 +243,11 @@ func (u *Usecase) jsonPage(ctx context.Context, row *model.Result, req Request, 
 		size := span.End - span.Start
 		if size < 0 || span.Start < 0 || span.End > row.CapturedBytes {
 			return resultfile.ErrCorrupt
+		}
+		if req.Count && req.Contains == "" && req.EqualsJSON == "" {
+			p.Count++
+			p.ScanEnd = i + 1
+			continue
 		}
 		if size > 1<<20 {
 			item := Item{Start: span.Start, End: span.End, Record: &i, Fragment: true, Text: "Record exceeds structured query limit; use read_tool_result bytes mode at this range."}
@@ -260,8 +336,8 @@ func (u *Usecase) jsonPage(ctx context.Context, row *model.Result, req Request, 
 	}
 	p.ScanComplete = p.ScanEnd == int64(len(col.Items)) && col.Complete
 	if p.ScanEnd == int64(len(col.Items)) && !col.Complete {
-		p.ScanComplete = true
-		p.Notice = "Collection index limit reached; use bytes mode for remaining data."
+		p.indexExhausted = true
+		p.Notice = "Collection index limit reached. Use analyze_tool_results on the saved array when available, or bytes mode for the remaining data."
 	}
 	return nil
 }
@@ -309,8 +385,7 @@ func (u *Usecase) textPage(ctx context.Context, row *model.Result, req Request, 
 			pos := strings.Index(string(chunk), req.Contains)
 			if pos >= 0 {
 				item.Start = start + int64(pos)
-				end := min(len(chunk), pos+256)
-				item.Text = prefix(string(chunk[pos:end]), 256)
+				item.Text = prefix(string(chunk[pos:]), 256)
 				consumed = pos + len(req.Contains)
 				item.End = start + int64(consumed)
 			} else if start+int64(consumed) < row.CapturedBytes {
@@ -334,14 +409,18 @@ func (u *Usecase) textPage(ctx context.Context, row *model.Result, req Request, 
 					item.Fragment = start+int64(consumed) < row.CapturedBytes
 				}
 			}
-			item.Text = prefix(string(chunk[:consumed]), consumed)
+			item.Text = prefix(string(chunk), consumed)
 			consumed = len(item.Text)
 			item.End = start + int64(consumed)
-			if consumed == 0 || !fits(p, item) {
+			if consumed == 0 || (!req.Count && !fits(p, item)) {
 				break
 			}
-			p.Items = append(p.Items, item)
-			p.Count++
+			if !req.Count {
+				p.Items = append(p.Items, item)
+			}
+			if !req.Count || !item.Fragment {
+				p.Count++
+			}
 		}
 		for consumed > 0 && consumed < len(chunk) && !utf8.RuneStart(chunk[consumed]) {
 			consumed--
@@ -354,7 +433,7 @@ func (u *Usecase) textPage(ctx context.Context, row *model.Result, req Request, 
 		if _, err = f.Seek(p.ScanEnd, io.SeekStart); err != nil {
 			return err
 		}
-		if len(p.Items) >= req.Limit || (!query && req.Mode == "bytes") {
+		if len(p.Items) >= req.Limit {
 			break
 		}
 	}

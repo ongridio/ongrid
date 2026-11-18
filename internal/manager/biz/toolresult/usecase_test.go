@@ -229,3 +229,129 @@ func TestLargeCapturePreservesOperationControls(t *testing.T) {
 		}
 	}
 }
+
+func TestMCPCollectionSelection(t *testing.T) {
+	for _, size := range []int{12, 6000, 80000} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			u, _, _, scope := fixture(t)
+			ctx := toolcapture.WithState(context.Background())
+			text := strings.Repeat("x", size)
+			raw := `{"content":[{"type":"text","text":"` + text + `"}],"structuredContent":{"content":[{"id":1},{"id":2},{"id":3}]}}`
+			toolcapture.Raw(ctx, []byte(raw), false)
+			encoded := u.Capture(ctx, scope, uuid.NewString(), "mcp__demo__list", text, nil, nil)
+			var view struct {
+				ResultID    string   `json:"result_id"`
+				Collections []string `json:"collection_pointers"`
+			}
+			if err := json.Unmarshal([]byte(encoded), &view); err != nil || view.ResultID == "" || len(encoded) > biz.ViewLimit || len(view.Collections) != 2 || view.Collections[0] != "/structuredContent/content" {
+				t.Fatalf("unexpected saved view id=%q, paths=%v bytes=%d", view.ResultID, view.Collections, len(encoded))
+			}
+			reader := u.BindTools(scope, nil)[0]
+			for _, tc := range []struct {
+				args    string
+				records int
+				problem string
+			}{
+				{`"pointer":"/structuredContent/content"`, 3, ""},
+				{`"mode":"json","collection_pointer":"/content"`, 1, ""},
+				{`"mode":"json","pointer":"/wrong"`, 0, "/structuredContent/content"},
+				{`"pointer":"/content","collection_pointer":"/structuredContent/content"`, 0, "conflict"},
+				{`"pointer":"/content","collection_pointer":""`, 0, "conflict"},
+				{`"collection_pointr":"/content"`, 0, "unknown field"},
+				{`"pointer":"/content","fields":["bad~2"]`, 0, "invalid JSON pointer"},
+			} {
+				out, err := reader.InvokableRun(ctx, `{"result_id":"`+view.ResultID+`",`+tc.args+`}`)
+				if tc.problem != "" {
+					if err == nil || !strings.Contains(err.Error(), tc.problem) {
+						t.Fatalf("%s: %v", tc.args, err)
+					}
+					continue
+				}
+				var page biz.Page
+				if err != nil || json.Unmarshal([]byte(out), &page) != nil || len(page.Items) != tc.records {
+					t.Fatalf("%s: %s %v", tc.args, out, err)
+				}
+			}
+		})
+	}
+}
+
+func TestCountIndexedOversizeAndReadBytePages(t *testing.T) {
+	u, _, _, scope := fixture(t)
+	ctx := context.Background()
+	id := capture(t, u, scope, `["`+strings.Repeat("x", 1<<20)+`",2]`)
+	p, err := u.Read(ctx, scope, biz.Request{ResultID: id, Mode: "json", Count: true}, true)
+	if err != nil || p.Count != 2 || !p.CountExact || len(p.Items) != 0 {
+		t.Fatalf("count: %+v %v", p, err)
+	}
+	id = capture(t, u, scope, strings.Repeat("中文", 300))
+	req := biz.Request{ResultID: id, Mode: "bytes", Limit: 2}
+	var content strings.Builder
+	for {
+		p, err = u.Read(ctx, scope, req, false)
+		if err != nil || p.ScanEnd <= p.ScanStart || (!p.ScanComplete && len(p.Items) != 2) {
+			t.Fatalf("page: %+v %v", p, err)
+		}
+		for _, item := range p.Items {
+			content.WriteString(item.Text)
+		}
+		if p.ScanComplete {
+			break
+		}
+		req.Cursor = p.NextCursor
+	}
+	if content.String() != strings.Repeat("中文", 300) {
+		t.Fatal("UTF-8 pagination lost data")
+	}
+}
+
+func TestStructurePagesAndMCPTextHints(t *testing.T) {
+	u, _, _, scope := fixture(t)
+	ctx := toolcapture.WithState(context.Background())
+	data := `{"content":[{"type":"image"},{"type":"text","text":"plain"}],"structuredContent":{"a/b~":"[1,2]","rows":[]},"pad":"` + strings.Repeat("x", 6000) + `"}`
+	toolcapture.Raw(ctx, []byte(data), false)
+	var v biz.View
+	err := json.Unmarshal([]byte(u.Capture(ctx, scope, uuid.NewString(), "mcp_call", "receipt", nil, nil)), &v)
+	if err != nil || strings.Join(v.TextPointers, ",") != "/structuredContent/a~1b~0,/content/1/text" {
+		t.Fatalf("text hints %v: %v", v.TextPointers, err)
+	}
+	req := biz.Request{ResultID: v.ResultID, Mode: "structure", Limit: 1}
+	var paths []string
+	for {
+		p, err := u.Read(ctx, scope, req, false)
+		if err != nil || len(p.Items) != 1 {
+			t.Fatalf("structure page %+v: %v", p, err)
+		}
+		var item struct{ Kind, Pointer string }
+		if err = json.Unmarshal([]byte(p.Items[0].JSON), &item); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, item.Kind+" "+item.Pointer)
+		if p.ScanComplete {
+			break
+		}
+		req.Cursor = p.NextCursor
+	}
+	if strings.Join(paths, ",") != "text /structuredContent/a~1b~0,array /structuredContent/rows,array /content,text /content/1/text" {
+		t.Fatal(paths)
+	}
+	p, err := u.Read(ctx, scope, biz.Request{ResultID: v.ResultID, Mode: "json", Collection: "/content", Count: true}, true)
+	if err != nil || p.Count != 2 || !p.CountExact || !strings.Contains(p.Notice, "display blocks") {
+		t.Fatalf("ambiguous block count: %+v %v", p, err)
+	}
+}
+
+func TestPartialIndexAndLongLines(t *testing.T) {
+	u, _, _, scope := fixture(t)
+	ctx := context.Background()
+	id := capture(t, u, scope, `{"first":[`+strings.Repeat("0,", 99999)+`0],"data":[1]}`)
+	p, err := u.Read(ctx, scope, biz.Request{ResultID: id, Mode: "json", Collection: "/data", Count: true}, true)
+	if err != nil || p.ScanComplete || p.CountExact || p.NextCursor != "" || !strings.Contains(p.Notice, "index limit") {
+		t.Fatalf("incomplete index: %+v %v", p, err)
+	}
+	id = capture(t, u, scope, strings.Repeat("中文", 700)+"\nlast")
+	p, err = u.Read(ctx, scope, biz.Request{ResultID: id, Mode: "lines", Count: true}, true)
+	if err != nil || p.Count != 2 || !p.CountExact || len(p.Items) != 0 {
+		t.Fatalf("lines count: %+v %v", p, err)
+	}
+}

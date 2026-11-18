@@ -211,3 +211,22 @@ func TestAnalysisConcurrentExecutionLimit(t *testing.T) {
 		}
 	}
 }
+
+func TestAnalysisReportsMCPBlockSelection(t *testing.T) {
+	u, _, _, scope := fixture(t)
+	ctx := toolcapture.WithState(context.Background())
+	toolcapture.Raw(ctx, []byte(`{"content":[{"type":"text","text":"summary"}],"structuredContent":{"data":[1,2]}}`), false)
+	u.Capture(ctx, scope, "call", "mcp__demo__list", "summary", nil, nil)
+	_, id, _ := toolcapture.Get(ctx)
+	u.SetAnalyzer(analysisFunc(func(_ context.Context, r resultanalysis.Request) (runner.Result, error) {
+		if r.Inputs[0].Pointer != "/content" {
+			t.Fatal("explicit selection changed")
+		}
+		return runner.Result{Stdout: `{"values":[1],"coverage":[]}`}, nil
+	}))
+	args := `{"inputs":[{"result_id":"` + id + `","format":"json","pointer":"/content"}],"expression":"reduce inputs as $r (0;.+1)"}`
+	report, err := analysisTool(t, u, scope).InvokableRun(toolcapture.WithState(ctx), args)
+	if err != nil || !strings.Contains(report, "MCP display blocks") {
+		t.Fatalf("report: %s %v", report, err)
+	}
+}

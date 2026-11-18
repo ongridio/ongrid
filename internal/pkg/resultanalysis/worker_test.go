@@ -35,8 +35,11 @@ func TestStreamingFormatsAndExactNumbers(t *testing.T) {
 		name, body, format, pointer, collection, expression, want string
 		rows                                                      int64
 	}{
+		{"object", `{"structuredContent":{"content":{"id":9007199254740993}}}`, "json_value", "/structuredContent/content", "", `[inputs.value.id]`, `[[9007199254740993]]`, 1},
+		{"scalar", `null`, "json_value", "", "", `[inputs.value]`, `[[null]]`, 1},
 		{"integer", `[{"n":18446744073709551615}]`, "json", "", "", `reduce inputs as $r (0; .+$r.value.n+1)`, `[18446744073709551616]`, 1},
 		{"native", `{"note":"ignored","data":{"items":[{"n":9007199254740993},{"n":2}]},"tail":[]}`, "json", "/data/items", "", `reduce inputs as $r (0; .+$r.value.n)`, `[9007199254740995]`, 2},
+		{"structured_text", `{"content":[{"text":"large header"}],"structuredContent":{"content":"{\"a/b~\":[0,2]}"}}`, "json_text", "/structuredContent/content", "/a~1b~0", `[inputs.value]`, `[[0,2]]`, 2},
 		{"wrapped", `{"content":[{"text":"{\"items\":[{\"n\":9007199254740993},{\"n\":2}]}"}]}`, "json_text", "/content/0/text", "/items", `reduce inputs as $r (0; .+$r.value.n)`, `[9007199254740995]`, 2},
 		{"csv", "id,note,cost\r\n9007199254740993,\"a, \"\"b\"\"\nnext\",23\r\n2,plain,7\r\n", "csv", "", "", `reduce inputs as $r ({count:0,sum:0,max_id:0}; .count+=1|.sum+=($r.value.cost|tonumber)|.max_id=([.max_id,($r.value.id|tonumber)]|max))`, `[{"count":2,"max_id":9007199254740993,"sum":30}]`, 2},
 		{"text", "error\nhealthy\nerror", "lines", "", "", `reduce inputs as $r (0; if $r.value=="error" then .+1 else . end)`, `[2]`, 3},
@@ -56,6 +59,8 @@ func TestStreamingFormatsAndExactNumbers(t *testing.T) {
 }
 func TestStreamingRejectsMalformedAndOversizedData(t *testing.T) {
 	for _, tc := range []struct{ format, pointer, collection, body string }{
+		{"json_value", "/value", "", `{"value":"` + strings.Repeat("x", MaxRecordBytes) + `"}`},
+		{"json_value", "/missing", "", `{"value":0}`},
 		{"json", "", "", `[1,]`}, {"json", "", "", `[1] true`}, {"json", "", "", `[1`},
 		{"json", "/rows", "", `{"rows":[1],"rows":[2]}`}, {"json", "/rows", "", `{"other":[1]}`},
 		{"json_text", "/text", "", `{"text":"[1,]"}`}, {"json_text", "/text", "", `{"text":"[1]\uD800"}`},

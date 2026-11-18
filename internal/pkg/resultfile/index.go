@@ -18,8 +18,9 @@ type Collection struct {
 	Complete bool   `json:"complete"`
 }
 type Index struct {
-	Version     int                   `json:"version"`
-	Collections map[string]Collection `json:"collections,omitempty"`
+	Version      int                   `json:"version"`
+	Collections  map[string]Collection `json:"collections,omitempty"`
+	TextPointers []string              `json:"text_pointers,omitempty"`
 }
 
 // BuildIndex indexes original byte positions without rewriting the payload.
@@ -31,15 +32,18 @@ func BuildIndex(body []byte) Index {
 		return idx
 	}
 	remaining := MaxIndexEntries
-	indexCollections(body, 0, "", 0, &remaining, idx.Collections)
+	indexCollections(body, 0, "", 0, &remaining, &idx)
 	return idx
 }
 
-func indexCollections(body []byte, base int64, path string, depth int, remaining *int, out map[string]Collection) {
-	if len(path) > 1024 || depth > 4 || *remaining <= 0 || len(out) >= 128 {
+func indexCollections(body []byte, base int64, path string, depth int, remaining *int, idx *Index) {
+	if len(path) > 1024 || depth > 4 || len(idx.Collections) >= 128 {
 		return
 	}
 	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) > 0 && trimmed[0] == '"' && (path == "/structuredContent" || strings.HasPrefix(path, "/structuredContent/")) && len(idx.TextPointers) < 128 {
+		idx.TextPointers = append(idx.TextPointers, path)
+	}
 	if len(trimmed) == 0 || (trimmed[0] != '[' && trimmed[0] != '{') {
 		return
 	}
@@ -61,10 +65,19 @@ func indexCollections(body []byte, base int64, path string, depth int, remaining
 				break
 			}
 			end := base + d.InputOffset()
+			if path == "/content" && len(collection.Items) < 12 && len(idx.TextPointers) < 128 {
+				var block struct {
+					Type string          `json:"type"`
+					Text json.RawMessage `json:"text"`
+				}
+				if json.Unmarshal(raw, &block) == nil && block.Type == "text" && len(block.Text) > 0 && block.Text[0] == '"' {
+					idx.TextPointers = append(idx.TextPointers, fmt.Sprintf("/content/%d/text", len(collection.Items)))
+				}
+			}
 			collection.Items = append(collection.Items, Span{end - int64(len(raw)), end})
 			*remaining--
 		}
-		out[path] = collection
+		idx.Collections[path] = collection
 		return
 	}
 	for d.More() {
@@ -81,8 +94,23 @@ func indexCollections(body []byte, base int64, path string, depth int, remaining
 			return
 		}
 		pointer := path + "/" + strings.ReplaceAll(strings.ReplaceAll(name, "~", "~0"), "/", "~1")
-		indexCollections(raw, base+d.InputOffset()-int64(len(raw)), pointer, depth+1, remaining, out)
+		indexCollections(raw, base+d.InputOffset()-int64(len(raw)), pointer, depth+1, remaining, idx)
 	}
+}
+
+func ValidPointer(pointer string) bool {
+	if pointer != "" && !strings.HasPrefix(pointer, "/") {
+		return false
+	}
+	for i := 0; i < len(pointer); i++ {
+		if pointer[i] == '~' {
+			i++
+			if i == len(pointer) || (pointer[i] != '0' && pointer[i] != '1') {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // Pointer selects a JSON field while preserving json.Number precision.
@@ -90,18 +118,10 @@ func Pointer(value any, pointer string) (any, bool) {
 	if pointer == "" {
 		return value, true
 	}
-	if !strings.HasPrefix(pointer, "/") {
+	if !ValidPointer(pointer) {
 		return nil, false
 	}
 	for _, part := range strings.Split(pointer[1:], "/") {
-		for i := 0; i < len(part); i++ {
-			if part[i] == '~' {
-				if i+1 >= len(part) || (part[i+1] != '0' && part[i+1] != '1') {
-					return nil, false
-				}
-				i++
-			}
-		}
 		part = strings.ReplaceAll(strings.ReplaceAll(part, "~1", "/"), "~0", "~")
 		switch v := value.(type) {
 		case map[string]any:

@@ -46,9 +46,9 @@ func (r Request) Validate() error {
 		}
 		seen[input.ID] = true
 		switch input.Format {
-		case "json", "json_text", "csv", "lines":
+		case "json", "json_value", "json_text", "csv", "lines":
 		default:
-			return fmt.Errorf("input format must be json, json_text, csv or lines")
+			return fmt.Errorf("input format must be json, json_value, json_text, csv or lines")
 		}
 		if input.CollectionPointer != "" && input.Format != "json_text" {
 			return fmt.Errorf("collection_pointer is only for JSON inside a text string")
