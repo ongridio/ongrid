@@ -21,6 +21,18 @@ func streamSource(r io.Reader, source Source, emit func(any) bool) error {
 	if source.Format == "json" {
 		return selectJSON(r, source.Pointer, func(b *bufio.Reader) error { return arrayRows(b, emit) })
 	}
+	if source.Format == "json_value" {
+		return selectJSON(r, source.Pointer, func(b *bufio.Reader) error {
+			value, err := jsonValue(b)
+			if err != nil {
+				return err
+			}
+			if !emit(value) {
+				return errStopped
+			}
+			return nil
+		})
+	}
 	parse := func(text io.Reader) error {
 		switch source.Format {
 		case "json_text":

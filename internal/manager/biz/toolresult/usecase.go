@@ -10,6 +10,8 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -117,18 +119,59 @@ func (u *Usecase) Open(ctx context.Context, scope Scope, id string) (*model.Resu
 }
 
 type View struct {
-	Operation       *basetool.Operation `json:"operation,omitempty"`
-	Kind            string              `json:"kind"`
-	ResultID        string              `json:"result_id,omitempty"`
-	Status          string              `json:"status"`
-	ExecutionStatus string              `json:"execution_status"`
-	CaptureStatus   string              `json:"capture_status"`
-	StorageStatus   string              `json:"storage_status"`
-	ViewStatus      string              `json:"view_status"`
-	CapturedBytes   int64               `json:"captured_bytes"`
-	Preview         string              `json:"preview,omitempty"`
-	Instruction     string              `json:"instruction,omitempty"`
+	Operation          *basetool.Operation `json:"operation,omitempty"`
+	Kind               string              `json:"kind"`
+	ResultID           string              `json:"result_id,omitempty"`
+	Status             string              `json:"status"`
+	ExecutionStatus    string              `json:"execution_status"`
+	CaptureStatus      string              `json:"capture_status"`
+	StorageStatus      string              `json:"storage_status"`
+	ViewStatus         string              `json:"view_status"`
+	CapturedBytes      int64               `json:"captured_bytes"`
+	CollectionPointers []string            `json:"collection_pointers,omitempty"`
+	TextPointers       []string            `json:"text_pointers,omitempty"`
+	ValuePointers      map[string]string   `json:"value_pointers,omitempty"`
+	MoreIndexedPaths   bool                `json:"more_indexed_paths,omitempty"`
+	PathIndexPartial   bool                `json:"path_index_partial,omitempty"`
+	Preview            string              `json:"preview,omitempty"`
+	Instruction        string              `json:"instruction,omitempty"`
 }
+
+func sortedPointers(paths []string) []string {
+	structured := func(p string) bool { return p == "/structuredContent" || strings.HasPrefix(p, "/structuredContent/") }
+	slices.SortFunc(paths, func(a, b string) int {
+		if structured(a) != structured(b) {
+			if structured(a) {
+				return -1
+			}
+			return 1
+		}
+		return strings.Compare(a, b)
+	})
+	return slices.Compact(paths)
+}
+
+// Include whole pointers within the model's view budget, with structured MCP data first.
+func visiblePointers(paths []string) []string {
+	var out []string
+	remaining := 768
+	for _, path := range sortedPointers(paths) {
+		quoted, _ := json.Marshal(path) // A string always marshals.
+		if len(quoted)+1 > remaining {
+			continue
+		}
+		out = append(out, path)
+		remaining -= len(quoted) + 1
+		if len(out) == 12 {
+			break
+		}
+	}
+	return out
+}
+
+func isMCPResult(tool string) bool { return strings.HasPrefix(tool, "mcp__") || tool == "mcp_call" }
+
+const mcpBlocksNotice = "Selected /content contains MCP display blocks. Counts describe blocks. For business records select the matching structuredContent array, or decode the relevant text block."
 
 func prefix(s string, n int) string {
 	if len(s) <= n {
@@ -146,10 +189,25 @@ func encodeView(v View) string {
 		if err != nil {
 			return `{"status":"failed","error":"result view encoding failed"}`
 		}
-		if len(b) <= ViewLimit || len(v.Preview) == 0 {
+		if len(b) <= ViewLimit {
 			return string(b)
 		}
-		v.Preview = prefix(v.Preview, len(v.Preview)/2)
+		switch {
+		case len(v.Preview) > 0:
+			v.Preview = prefix(v.Preview, len(v.Preview)/2)
+		case len(v.TextPointers) > 0:
+			v.MoreIndexedPaths = true
+			v.TextPointers = v.TextPointers[:len(v.TextPointers)-1]
+		case len(v.ValuePointers) > 0:
+			paths := sortedPointers(slices.Collect(maps.Keys(v.ValuePointers)))
+			delete(v.ValuePointers, paths[len(paths)-1])
+			v.MoreIndexedPaths = true
+		case len(v.CollectionPointers) > 0:
+			v.MoreIndexedPaths = true
+			v.CollectionPointers = v.CollectionPointers[:len(v.CollectionPointers)-1]
+		default:
+			return string(b)
+		}
 	}
 }
 
@@ -219,7 +277,38 @@ func (u *Usecase) Capture(ctx context.Context, scope Scope, executionID, tool, o
 	toolcapture.Link(ctx, row.ID)
 	// Keep control envelopes and small legacy results byte-for-byte intact.
 	if ((len(output) <= ViewLimit && len(raw) <= ViewLimit) || tool == "draft_config_change") && runErr == nil && row.CaptureStatus == "complete" {
-		return output
+		if !isMCPResult(tool) {
+			return output
+		}
+		var mcp struct {
+			Structured json.RawMessage `json:"structuredContent"`
+		}
+		if json.Unmarshal(raw, &mcp) != nil || len(mcp.Structured) == 0 || string(mcp.Structured) == "null" || string(mcp.Structured) == output {
+			return output
+		}
+		// A small MCP text block can be just a receipt for structured data.
+		v.Preview = "/structuredContent: " + prefix(string(mcp.Structured), 1024) + "\nMCP text: " + prefix(output, 768)
+	}
+	if row.ContentType == "application/json" {
+		idx, indexErr := u.repo.Index(writeCtx, row)
+		if indexErr != nil {
+			v.PathIndexPartial = true
+			u.log.WarnContext(writeCtx, "cannot describe saved result index", "result_id", row.ID, "err", indexErr)
+		} else {
+			v.CollectionPointers = visiblePointers(slices.Collect(maps.Keys(idx.Collections)))
+			v.TextPointers = visiblePointers(idx.TextPointers)
+			if len(idx.ValuePointers) > 0 {
+				v.ValuePointers = make(map[string]string)
+				for _, path := range visiblePointers(slices.Collect(maps.Keys(idx.ValuePointers))) {
+					v.ValuePointers[path] = idx.ValuePointers[path]
+				}
+			}
+			v.MoreIndexedPaths = len(v.CollectionPointers) < len(idx.Collections) || len(v.TextPointers) < len(idx.TextPointers) || len(v.ValuePointers) < len(idx.ValuePointers)
+			v.PathIndexPartial = idx.PathIndexStatus != resultfile.PathIndexComplete
+		}
+	}
+	if tool == "analyze_tool_results" && status == "success" && u.analyzer != nil {
+		v.Instruction += " For this saved analysis use json_text at /stdout with collection_pointer /values or /coverage."
 	}
 	return encodeView(v)
 }

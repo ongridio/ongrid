@@ -6,7 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -15,7 +18,10 @@ import (
 	biz "github.com/ongridio/ongrid/internal/manager/biz/toolresult"
 	store "github.com/ongridio/ongrid/internal/manager/data/toolresult/store"
 	session "github.com/ongridio/ongrid/internal/manager/model/aiops"
+	model "github.com/ongridio/ongrid/internal/manager/model/toolresult"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
+	"github.com/ongridio/ongrid/internal/pkg/resultanalysis"
+	"github.com/ongridio/ongrid/internal/pkg/resultfile"
 	"github.com/ongridio/ongrid/internal/pkg/toolcapture"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -226,6 +232,352 @@ func TestLargeCapturePreservesOperationControls(t *testing.T) {
 		file.Close()
 		if err != nil || string(saved) != string(raw) {
 			t.Fatal("saved evidence changed")
+		}
+	}
+}
+
+func TestMCPCollectionSelection(t *testing.T) {
+	for _, size := range []int{12, 6000, 80000} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			u, _, _, scope := fixture(t)
+			ctx := toolcapture.WithState(context.Background())
+			text := strings.Repeat("x", size)
+			raw := `{"content":[{"type":"text","text":"` + text + `"}],"structuredContent":{"content":[{"id":1},{"id":2},{"id":3}]}}`
+			toolcapture.Raw(ctx, []byte(raw), false)
+			encoded := u.Capture(ctx, scope, uuid.NewString(), "mcp__demo__list", text, nil, nil)
+			var view struct {
+				ResultID    string   `json:"result_id"`
+				Collections []string `json:"collection_pointers"`
+			}
+			if err := json.Unmarshal([]byte(encoded), &view); err != nil || view.ResultID == "" || len(encoded) > biz.ViewLimit || len(view.Collections) != 2 || view.Collections[0] != "/structuredContent/content" {
+				t.Fatalf("unexpected saved view id=%q, paths=%v bytes=%d", view.ResultID, view.Collections, len(encoded))
+			}
+			reader := u.BindTools(scope, nil)[0]
+			for _, tc := range []struct {
+				args    string
+				records int
+				problem string
+			}{
+				{`"pointer":"/structuredContent/content"`, 3, ""},
+				{`"mode":"json","collection_pointer":"/content"`, 1, ""},
+				{`"mode":"json","pointer":"/wrong"`, 0, "/structuredContent/content"},
+				{`"pointer":"/content","collection_pointer":"/structuredContent/content"`, 0, "conflict"},
+				{`"pointer":"/content","collection_pointer":""`, 0, "conflict"},
+				{`"collection_pointr":"/content"`, 0, "unknown field"},
+				{`"pointer":"/content","fields":["bad~2"]`, 0, "invalid JSON pointer"},
+			} {
+				out, err := reader.InvokableRun(ctx, `{"result_id":"`+view.ResultID+`",`+tc.args+`}`)
+				if tc.problem != "" {
+					if err == nil || !strings.Contains(err.Error(), tc.problem) {
+						t.Fatalf("%s: %v", tc.args, err)
+					}
+					continue
+				}
+				var page biz.Page
+				if err != nil || json.Unmarshal([]byte(out), &page) != nil || len(page.Items) != tc.records {
+					t.Fatalf("%s: %s %v", tc.args, out, err)
+				}
+			}
+		})
+	}
+}
+
+func TestCountIndexedOversizeAndReadBytePages(t *testing.T) {
+	u, _, _, scope := fixture(t)
+	ctx := context.Background()
+	id := capture(t, u, scope, `["`+strings.Repeat("x", 1<<20)+`",2]`)
+	p, err := u.Read(ctx, scope, biz.Request{ResultID: id, Mode: "json", Count: true}, true)
+	if err != nil || p.Count != 2 || !p.CountExact || len(p.Items) != 0 {
+		t.Fatalf("count: %+v %v", p, err)
+	}
+	id = capture(t, u, scope, strings.Repeat("中文", 300))
+	req := biz.Request{ResultID: id, Mode: "bytes", Limit: 2}
+	var content strings.Builder
+	for {
+		p, err = u.Read(ctx, scope, req, false)
+		if err != nil || p.ScanEnd <= p.ScanStart || (!p.ScanComplete && len(p.Items) != 2) {
+			t.Fatalf("page: %+v %v", p, err)
+		}
+		for _, item := range p.Items {
+			content.WriteString(item.Text)
+		}
+		if p.ScanComplete {
+			break
+		}
+		req.Cursor = p.NextCursor
+	}
+	if content.String() != strings.Repeat("中文", 300) {
+		t.Fatal("UTF-8 pagination lost data")
+	}
+}
+
+func TestStructurePagesAndMCPTextHints(t *testing.T) {
+	u, _, _, scope := fixture(t)
+	ctx := toolcapture.WithState(context.Background())
+	data := `{"content":[{"type":"image"},{"type":"text","text":"plain"}],"structuredContent":{"a/b~":"[1,2]","rows":[]},"pad":"` + strings.Repeat("x", 6000) + `"}`
+	toolcapture.Raw(ctx, []byte(data), false)
+	var v biz.View
+	err := json.Unmarshal([]byte(u.Capture(ctx, scope, uuid.NewString(), "mcp_call", "receipt", nil, nil)), &v)
+	if err != nil || strings.Join(v.TextPointers, ",") != "/structuredContent/a~1b~0,/content/1/text" {
+		t.Fatalf("text hints %v: %v", v.TextPointers, err)
+	}
+	req := biz.Request{ResultID: v.ResultID, Mode: "structure", Limit: 1}
+	var paths []string
+	for {
+		p, err := u.Read(ctx, scope, req, false)
+		if err != nil || len(p.Items) != 1 {
+			t.Fatalf("structure page %+v: %v", p, err)
+		}
+		var item struct{ Kind, Pointer string }
+		if err = json.Unmarshal([]byte(p.Items[0].JSON), &item); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, item.Kind+" "+item.Pointer)
+		if p.ScanComplete {
+			break
+		}
+		req.Cursor = p.NextCursor
+	}
+	if strings.Join(paths, ",") != "object /structuredContent,text /structuredContent/a~1b~0,array /structuredContent/rows,array /content,text /content/1/text" {
+		t.Fatal(paths)
+	}
+	p, err := u.Read(ctx, scope, biz.Request{ResultID: v.ResultID, Mode: "json", Collection: "/content", Count: true}, true)
+	if err != nil || p.Count != 2 || !p.CountExact || !strings.Contains(p.Notice, "display blocks") {
+		t.Fatalf("ambiguous block count: %+v %v", p, err)
+	}
+}
+
+func TestPartialIndexAndLongLines(t *testing.T) {
+	u, _, _, scope := fixture(t)
+	ctx := context.Background()
+	id := capture(t, u, scope, `{"first":[`+strings.Repeat("0,", 99999)+`0],"data":[1]}`)
+	p, err := u.Read(ctx, scope, biz.Request{ResultID: id, Mode: "json", Collection: "/data", Count: true}, true)
+	if err != nil || p.ScanComplete || p.CountExact || p.NextCursor != "" || !strings.Contains(p.Notice, "index limit") {
+		t.Fatalf("incomplete index: %+v %v", p, err)
+	}
+	id = capture(t, u, scope, strings.Repeat("中文", 700)+"\nlast")
+	p, err = u.Read(ctx, scope, biz.Request{ResultID: id, Mode: "lines", Count: true}, true)
+	if err != nil || p.Count != 2 || !p.CountExact || len(p.Items) != 0 {
+		t.Fatalf("lines count: %+v %v", p, err)
+	}
+}
+
+func TestLineScanBudget(t *testing.T) {
+	u, _, _, scope := fixture(t)
+	body := strings.Repeat("x\n", 25000)
+	id := capture(t, u, scope, body)
+	tool := u.BindTools(scope, nil)[1]
+	out, err := tool.InvokableRun(context.Background(), `{"result_id":"`+id+`","mode":"lines","count":true}`)
+	var p biz.Page
+	if err != nil || json.Unmarshal([]byte(out), &p) != nil || !p.CountExact || p.Count != 25000 || p.ScannedBytes != int64(len(body)) || p.NextCursor != "" {
+		t.Fatalf("25,000 short lines: %+v err=%v", p, err)
+	}
+}
+
+func TestLineCountsAcrossFragments(t *testing.T) {
+	u, _, _, scope := fixture(t)
+	for _, tc := range []struct {
+		body  string
+		lines int64
+	}{
+		{"", 0}, {"\n", 1}, {"\r\n\n", 2}, {strings.Repeat("x", 600), 1},
+		{strings.Repeat("a", 255) + "中文\r\nlast", 2}, {strings.Repeat("中", 1500) + "\n", 1},
+	} {
+		id := capture(t, u, scope, tc.body)
+		for _, limit := range []int{1, 50} {
+			req := biz.Request{ResultID: id, Mode: "lines", Limit: limit}
+			var combined strings.Builder
+			var count int64
+			for {
+				p, err := u.Read(context.Background(), scope, req, false)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, item := range p.Items {
+					if item.Start != int64(combined.Len()) || item.End != item.Start+int64(len(item.Text)) {
+						t.Fatal(item)
+					}
+					combined.WriteString(item.Text)
+				}
+				count += p.Count
+				if p.ScanComplete {
+					if p.CountExact != (p.ScanStart == 0) {
+						t.Fatal(p)
+					}
+					break
+				}
+				if p.NextCursor == "" || p.ScanEnd <= p.ScanStart {
+					t.Fatal("no progress")
+				}
+				req.Cursor = p.NextCursor
+			}
+			if count != tc.lines || combined.String() != tc.body {
+				t.Fatalf("%d bytes, page limit %d: counted %d lines, want %d", len(tc.body), limit, count, tc.lines)
+			}
+		}
+		p, err := u.Read(context.Background(), scope, biz.Request{ResultID: id, Mode: "lines", Count: true}, true)
+		if err != nil || !p.CountExact || p.Count != tc.lines {
+			t.Fatalf("query lines: %+v %v", p, err)
+		}
+	}
+}
+
+func TestMCPValueAndLateTextDiscovery(t *testing.T) {
+	u, _, _, scope := fixture(t)
+	ctx := toolcapture.WithState(context.Background())
+	raw := `{"content":[` + strings.Repeat(`{"type":"image"},`, 12) + `{"type":"text","text":"` + strings.Repeat("a", 6500) + `"}],"structuredContent":{"content":{"total":42,"a/b~":false,"absent":null}}}`
+	toolcapture.Raw(ctx, []byte(raw), false)
+	out := u.Capture(ctx, scope, uuid.NewString(), "mcp_call", "receipt", nil, nil)
+	var v biz.View
+	if err := json.Unmarshal([]byte(out), &v); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"/structuredContent": "object", "/structuredContent/content": "object", "/structuredContent/content/total": "number", "/structuredContent/content/a~1b~0": "boolean", "/structuredContent/content/absent": "null"}
+	if !maps.Equal(v.ValuePointers, want) || strings.Contains(v.Preview, "total") {
+		t.Errorf("capture value paths=%v", v.ValuePointers)
+	}
+	if !slices.Contains(v.TextPointers, "/content/12/text") {
+		t.Errorf("late text path not shown: %v", v.TextPointers)
+	}
+	page, err := u.Read(ctx, scope, biz.Request{ResultID: v.ResultID, Mode: "structure"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]string{}
+	for _, item := range page.Items {
+		var path struct{ Kind, Pointer string }
+		if err := json.Unmarshal([]byte(item.JSON), &path); err != nil {
+			t.Fatal(err)
+		}
+		seen[path.Pointer] = path.Kind
+	}
+	want["/content"] = "array"
+	want["/content/12/text"] = "text"
+	if !page.CountExact || !maps.Equal(seen, want) {
+		t.Errorf("structure paths=%v", seen)
+	}
+	if runtime.GOOS == "linux" {
+		client, err := resultanalysis.NewClient()
+		if err != nil {
+			t.Fatal(err)
+		}
+		u.SetAnalyzer(client)
+		tool := analysisTool(t, u, scope)
+		for _, tc := range []struct{ path, format, expr, expect string }{
+			{"/structuredContent/content", "json_value", "inputs.value.total", "42"},
+			{"/structuredContent/content/a~1b~0", "json_value", "inputs.value", "false"},
+			{"/structuredContent/content/absent", "json_value", "inputs.value", "null"},
+			{"/content/12/text", "lines", "inputs.value | length", "6500"},
+		} {
+			args, err := json.Marshal(map[string]any{"inputs": []resultanalysis.Source{{ID: v.ResultID, Pointer: tc.path, Format: tc.format}}, "expression": tc.expr})
+			if err != nil {
+				t.Fatal(err)
+			}
+			out, err := tool.InvokableRun(toolcapture.WithState(context.Background()), string(args))
+			var report struct{ Status, Stdout string }
+			var output struct {
+				Values   []json.RawMessage
+				Coverage []resultanalysis.Coverage
+			}
+			if err != nil || json.Unmarshal([]byte(out), &report) != nil || report.Status != "success" ||
+				json.Unmarshal([]byte(report.Stdout), &output) != nil || len(output.Values) != 1 || string(output.Values[0]) != tc.expect ||
+				len(output.Coverage) != 1 || !output.Coverage[0].Complete || output.Coverage[0].RecordsRead != 1 {
+				t.Fatalf("analysis at %s: %s, %v", tc.path, out, err)
+			}
+		}
+	}
+
+}
+
+func TestMCPTextPathLimits(t *testing.T) {
+	u, _, _, scope := fixture(t)
+	for _, n := range []int{12, 13, 128, 129} {
+		ctx := toolcapture.WithState(context.Background())
+		blocks := strings.Repeat(`{"type":"text","text":"hello"},`, n)
+		raw := `{"pad":"` + strings.Repeat("a", 5000) + `","content":[` + strings.TrimSuffix(blocks, ",") + `]}`
+		toolcapture.Raw(ctx, []byte(raw), false)
+		out := u.Capture(ctx, scope, uuid.NewString(), "mcp_call", "receipt", nil, nil)
+		var view biz.View
+		if err := json.Unmarshal([]byte(out), &view); err != nil {
+			t.Fatal(err)
+		}
+		if len(view.TextPointers) != 12 || view.MoreIndexedPaths != (n > 12) || view.PathIndexPartial != (n > 128) {
+			t.Errorf("%d blocks: hints=%d more=%v partial=%v", n, len(view.TextPointers), view.MoreIndexedPaths, view.PathIndexPartial)
+		}
+		req := biz.Request{ResultID: view.ResultID, Mode: "structure", Limit: 10}
+		paths := map[string]bool{}
+		for {
+			p, err := u.Read(ctx, scope, req, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, item := range p.Items {
+				var path struct{ Pointer string }
+				if err := json.Unmarshal([]byte(item.JSON), &path); err != nil {
+					t.Fatal(err)
+				}
+				if paths[path.Pointer] {
+					t.Fatal("duplicate", path.Pointer)
+				}
+				paths[path.Pointer] = true
+			}
+			if p.NextCursor == "" {
+				if p.ScanComplete != (n <= 128) || (p.Notice != "") != (n > 128) {
+					t.Errorf("%d blocks: complete=%v notice=%q", n, p.ScanComplete, p.Notice)
+				}
+				break
+			}
+			req.Cursor = p.NextCursor
+		}
+		if len(paths) != 1+min(n, 128) || !paths[fmt.Sprintf("/content/%d/text", min(n, 128)-1)] {
+			t.Errorf("%d blocks: indexed %d paths", n, len(paths))
+		}
+	}
+}
+
+func TestUTF8AcrossScanLimit(t *testing.T) {
+	u, _, _, scope := fixture(t)
+	const needle = "中a"
+	// The first occurrence crosses a buffer boundary, the second a scan limit.
+	body := strings.Repeat("x", 4095) + needle
+	body += strings.Repeat("x", biz.ScanLimit-len(body)-1) + needle + "\nend"
+	id := capture(t, u, scope, body)
+	for _, contains := range []string{"", needle} {
+		req := biz.Request{ResultID: id, Mode: "lines", Count: true, Contains: contains}
+		first, err := u.Read(context.Background(), scope, req, true)
+		if err != nil || first.ScannedBytes != biz.ScanLimit || first.NextCursor == "" || first.CountExact || first.ScanEnd > biz.ScanLimit-1 {
+			t.Fatalf("first scan: %+v %v", first, err)
+		}
+		req.Cursor = first.NextCursor
+		last, err := u.Read(context.Background(), scope, req, true)
+		if err != nil || !last.ScanComplete || last.ScanStart != first.ScanEnd || last.ScanEnd != int64(len(body)) || first.Count+last.Count != 2 {
+			t.Fatalf("continuation: %+v %v", last, err)
+		}
+	}
+}
+
+// Represent an immutable file index written before typed path discovery.
+type earlierIndexRepo struct{ biz.Repo }
+
+func (r earlierIndexRepo) Index(context.Context, *model.Result) (resultfile.Index, error) {
+	return resultfile.Index{Version: 1, Collections: map[string]resultfile.Collection{"/content": {Complete: true}}}, nil
+}
+func TestHistoricalStructureInventory(t *testing.T) {
+	u, repo, sessions, scope := fixture(t)
+	legacy := biz.New(earlierIndexRepo{repo}, sessions, []byte("test-signing-key"), nil)
+	for _, size := range []int{80000, biz.ScanLimit} {
+		body := `{"content":[],"pad":"` + strings.Repeat("x", size) + `","structuredContent":{"total":42}}`
+		id := capture(t, u, scope, body)
+		p, err := legacy.Read(context.Background(), scope, biz.Request{ResultID: id, Mode: "structure"}, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(body) <= biz.ScanLimit {
+			if !p.CountExact || p.ScannedBytes != int64(len(body)) || len(p.Items) != 3 || !strings.Contains(p.Items[1].JSON, "/structuredContent/total") {
+				t.Fatal(p)
+			}
+		} else if p.ScanComplete || p.CountExact || p.Notice == "" || p.NextCursor != "" || p.ScannedBytes != 0 || len(p.Items) != 1 || !strings.Contains(p.Items[0].JSON, "/content") {
+			t.Fatal(p)
 		}
 	}
 }

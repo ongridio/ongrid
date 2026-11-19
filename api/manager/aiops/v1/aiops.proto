@@ -269,7 +269,9 @@ message GetSavedToolResultResponse {
 message ReadSavedToolResultRequest {
     string session_id = 1;
     string result_id = 2;
-    // bytes/lines: start is an original byte offset; json: element offset.
+    // Start counts original bytes in bytes/lines mode, array elements in json
+    // mode, or indexed paths in structure mode. Structure items describe a
+    // pointer and its kind (array, text, object, number, boolean, or null) in data_json.
     string mode = 3;
     int64 start = 4;
     string cursor = 5;

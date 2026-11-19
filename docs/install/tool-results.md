@@ -28,6 +28,15 @@ The quota counts compressed payload, index and manifest file sizes. It is not a 
 
 The model uses `read_tool_result` and `query_tool_result`; the console's saved-result dialog uses the authenticated session API. JSON array output uses a `data_json` string so large integer IDs retain their exact digits. Search counts cover only the displayed scan interval. Partial or expired captures must not be presented as complete evidence.
 
+The saved view lists arrays in `collection_pointers`, strings in `text_pointers`, and native MCP objects, numbers, booleans and nulls in `value_pointers`. Use `json_value` to analyze one of these values. If `more_indexed_paths` is true, call `read_tool_result` with `mode="structure"` and follow `next_cursor` for more indexed paths. If `path_index_partial` is true, the index may omit paths. A terminal structure page with `scan_complete=false` explains the limit and has no next cursor. For earlier file-backed JSON results, structure mode rebuilds the inventory on read when the payload fits the 8 MiB scan limit. Larger historical results expose their saved paths and a notice. Byte reads and analysis at known paths still use the original payload.
+
+| Saved data | How to select it |
+| --- | --- |
+| MCP business records in a JSON array | Use the matching `/structuredContent/…` path. Both tools accept `pointer`. The reader also accepts `collection_pointer` and infers JSON mode. |
+| MCP display blocks | Select `/content` to read or count the blocks. A single block can describe many business records. |
+| JSON encoded in a string | Use analysis format `json_text`, set `pointer` to the string, and set `collection_pointer` to the array inside the decoded JSON. |
+| Single JSON object or scalar | Use analysis format `json_value`. It emits one record and applies the 1 MiB record limit. |
+
 ## Recovery and retention
 
 Execution, capture and storage have separate status fields. A tool may have completed even if storing its result failed. Do not repeat a write to retrieve its output.
