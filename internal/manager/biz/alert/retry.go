@@ -112,7 +112,8 @@ func (w *RetryWorker) runOnce(ctx context.Context) {
 //  2. If the incident is already resolved, mark the delivery success
 //     (operator no longer needs the notify).
 //  3. Otherwise rebuild the notify.Message from the incident state and
-//     re-call notifier.Send for the channel name.
+//     re-send through the channel row's sender (BuildSenderFromChannel +
+//     notifier.SendVia), as MaybeNotify does for the first attempt.
 //  4. Update the delivery with attempt_count++ and the new outcome.
 func (w *RetryWorker) retryOne(ctx context.Context, d *model.Delivery, now time.Time) {
 	if d == nil || d.IncidentID == nil {
@@ -161,7 +162,16 @@ func (w *RetryWorker) retryOne(ctx context.Context, d *model.Delivery, now time.
 	msg := buildIncidentMessage(incident, now)
 	sentAt := now
 	finished := now
-	sendErr := w.notifier.Send(ctx, msg, channel.Name)
+	// Deliveries only exist for persisted channels, which MaybeNotify sends
+	// through a sender built from the row. Retry the same way: the
+	// env-config router only knows env channel names, so sending by name
+	// fails for UI-created channels and ignores edits to seeded ones.
+	var sendErr error
+	if sender, berr := BuildSenderFromChannel(channel); berr != nil {
+		sendErr = berr
+	} else {
+		sendErr = w.notifier.SendVia(ctx, msg, sender)
+	}
 	status := model.DeliveryStatusSuccess
 	var errMsg *string
 	eventType := model.EventTypeNotificationSent
