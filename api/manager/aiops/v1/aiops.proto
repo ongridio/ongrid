@@ -271,7 +271,7 @@ message ReadSavedToolResultRequest {
     string result_id = 2;
     // Start counts original bytes in bytes/lines mode, array elements in json
     // mode, or indexed paths in structure mode. Structure items describe a
-    // pointer and its kind (array or text) in data_json.
+    // pointer and its kind (array, text, object, number, boolean, or null) in data_json.
     string mode = 3;
     int64 start = 4;
     string cursor = 5;

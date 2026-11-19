@@ -63,7 +63,7 @@ type readerTool struct {
 
 func (t *readerTool) Info(context.Context) (*basetool.ToolInfo, error) {
 	name := "read_tool_result"
-	desc := "Read a bounded page of a saved tool result. Bytes/lines use byte offsets; JSON uses indexed array element offsets. Use structure mode to list indexed arrays and known text paths, including for earlier saved results. Select an entry from collection_pointers. For MCP business rows select the matching /structuredContent array; /content holds the MCP display blocks. Keep result_id and cursor; do not load the entire file into context."
+	desc := "Read a bounded page of a saved tool result. Bytes/lines use byte offsets; JSON uses indexed array element offsets. Use structure mode to list indexed arrays, text and native MCP objects or scalars. more_indexed_paths means the preview omits indexed paths. path_index_partial means additional unindexed paths may exist. Select an entry from collection_pointers. For MCP business rows select the matching /structuredContent array; /content holds the MCP display blocks. Keep result_id and cursor; do not load the entire file into context."
 	if t.query {
 		name = "query_tool_result"
 		desc = "Search saved tool evidence using literal contains or exact JSON field equality. Scan is bounded; count describes only scan_start..scan_end. Continue with cursor only when more evidence is needed."
