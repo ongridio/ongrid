@@ -368,6 +368,7 @@ export default function ChatThreadPage() {
               id: toolCardId(t.tool_call_id),
               role: 'tool',
               kind: 'tool_card',
+              created_at: t.started_at,
               tool_call: {
                 id: t.tool_call_id,
                 name: t.name,
@@ -391,6 +392,7 @@ export default function ChatThreadPage() {
                 m.id === targetId
                   ? {
                       ...m,
+                      created_at: t.ended_at,
                       tool_call: {
                         id: t.tool_call_id,
                         name: t.name,
@@ -670,6 +672,7 @@ export default function ChatThreadPage() {
                 <MessageBubble
                   key={m.id}
                   message={m}
+                  messages={messages}
                   sessionId={sessionId}
                   onConfirmConfigDraft={isViewer ? undefined : confirmConfigDraft}
                   hideActiveOperations

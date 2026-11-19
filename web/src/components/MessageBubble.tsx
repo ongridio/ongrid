@@ -18,7 +18,8 @@ import {
   X,
   XCircle,
 } from 'lucide-react';
-import { loadChatAttachment, type ChatMessage, type ImageAttachment, type ToolCallSummary } from '@/api/chat';
+import { getMessages, loadChatAttachment, type ChatMessage, type ImageAttachment, type ToolCallSummary } from '@/api/chat';
+import { workerTurn, workerTurnSteps, type WorkerTurn } from '@/lib/workerTurn';
 import { approveApproval, rejectApproval, getApproval } from '@/api/approvals';
 import { cn } from '@/lib/cn';
 import { isConfigDraftConfirmationMessage } from '@/lib/configDraftConfirmation';
@@ -62,14 +63,17 @@ export type OperationCardData = {
 
 type Props = {
   message: ChatMessage;
+  messages?: ChatMessage[];
   sessionId?: string;
   onConfirmConfigDraft?: ConfirmConfigDraft;
   hideActiveOperations?: boolean;
 };
 
-export function MessageBubble({ message, sessionId, onConfirmConfigDraft, hideActiveOperations }: Props) {
+export function MessageBubble({ message, messages, sessionId, onConfirmConfigDraft, hideActiveOperations }: Props) {
   if ((message.kind === 'tool_card' || message.role === 'tool') && message.tool_call) {
-    return <ToolCallSummaryBlock sessionId={sessionId} call={{...fromSummary(message.tool_call), result_id: message.tool_call.result_id ?? message.result_id}} onConfirmConfigDraft={onConfirmConfigDraft} hideActiveOperations={hideActiveOperations} />;
+    return <ToolCallSummaryBlock sessionId={sessionId} message={message} messages={messages}
+      call={{...fromSummary(message.tool_call), result_id: message.tool_call.result_id ?? message.result_id}}
+      onConfirmConfigDraft={onConfirmConfigDraft} hideActiveOperations={hideActiveOperations} />;
   }
   if (message.role === 'tool') return <ToolBubble sessionId={sessionId} message={message} onConfirmConfigDraft={onConfirmConfigDraft} hideActiveOperations={hideActiveOperations} />;
   if (message.role === 'user') return <UserBubble message={message} sessionId={sessionId} />;
@@ -213,6 +217,7 @@ function ToolBubble({ message, sessionId, onConfirmConfigDraft, hideActiveOperat
   return (
     <ToolCallSummaryBlock
       sessionId={sessionId}
+      message={message}
       onConfirmConfigDraft={onConfirmConfigDraft}
       call={{
         name: message.tool_name ?? 'tool',
@@ -228,10 +233,16 @@ function ToolBubble({ message, sessionId, onConfirmConfigDraft, hideActiveOperat
 function ToolCallSummaryBlock({
   call,
   sessionId,
+  message,
+  messages,
+  workerStep = false,
   onConfirmConfigDraft,
   hideActiveOperations,
 }: {
   sessionId?: string;
+  message?: ChatMessage;
+  messages?: ChatMessage[];
+  workerStep?: boolean;
   call: {
     result_id?: string;
     name: string;
@@ -250,20 +261,23 @@ function ToolCallSummaryBlock({
   const status = resolveToolStatus(call);
   const isPending = status === 'pending';
   const isError = status === 'error' || status === 'timeout' || !!call.error;
-  const hint = argSummary(call.arguments);
+  const args = call.arguments as Record<string, unknown> | undefined;
+  const taskSummary = call.name === 'SendMessage' ? args?.message : call.name === 'AgentTool' ? args?.description : undefined;
+  const hint = typeof taskSummary === 'string' ? truncate(taskSummary, 80) : argSummary(call.arguments);
+  const turn = open && !isPending && !workerStep ? workerTurn(call.name, args, call.result) : undefined;
   // Inline approval (HLD-017): a cloud_bash / MCP tool result that returned
   // pending_approval renders an in-conversation 批准/拒绝 card instead of a
   // plain result blob — the human confirms right here, no inbox detour.
   const approval = pendingApproval(call.result);
-  if (approval) {
+  if (approval && !workerStep) {
     return <PendingApprovalCard approvalID={approval.id} kind={approval.kind} toolName={approval.toolName || call.name} command={approval.command || argCommandText(call.arguments)} />;
   }
-  const operation = !isError ? operationFromToolResult(call.result) : null;
+  const operation = !workerStep && !isError ? operationFromToolResult(call.result) : null;
   if (operation) {
     if (hideActiveOperations && !isTerminalOperationState(operation.state)) return null;
     return <OperationCard operation={operation} />;
   }
-  const configDraft = !isError ? asConfigDraft(call.result) : null;
+  const configDraft = !workerStep && !isError ? asConfigDraft(call.result) : null;
   const candidate = call.result && typeof call.result === 'object' ? call.result as Record<string, unknown> : undefined;
   const resultId = call.result_id ?? (candidate?.kind === 'tool_result' && typeof candidate.result_id === 'string' ? candidate.result_id : undefined);
   return (
@@ -276,14 +290,15 @@ function ToolCallSummaryBlock({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
         aria-label={tr(`工具调用 ${call.name}`, `Tool call ${call.name}`)}
-        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-zinc-300 hover:bg-zinc-800/40"
+        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-zinc-300 hover:bg-zinc-800/40 [&>svg]:shrink-0"
       >
         <StatusIcon status={status} />
         <Wrench size={12} className="text-zinc-500" />
         <span className="font-medium text-zinc-200">{call.name}</span>
         {hint && (
-          <Hint content={hint}><span className="truncate text-[11px] text-zinc-500" >
+          <Hint content={hint}><span className="min-w-0 truncate text-[11px] text-zinc-500" >
             {hint}
           </span></Hint>
         )}
@@ -292,7 +307,7 @@ function ToolCallSummaryBlock({
             host#{call.device_id}
           </span>
         )}
-        <span className="ml-auto flex items-center gap-2 text-[11px] text-zinc-500">
+        <span className="ml-auto flex shrink-0 items-center gap-2 text-[11px] text-zinc-500">
           {typeof call.duration_ms === 'number' && call.duration_ms > 0 && (
             <span>{formatDuration(call.duration_ms)}</span>
           )}
@@ -311,6 +326,7 @@ function ToolCallSummaryBlock({
       )}
       {open && (
         <div className="border-t border-zinc-800/80 bg-zinc-950/40 px-3 py-2">
+          {turn && message && <WorkerSteps turn={turn} message={message} messages={messages} />}
           {call.arguments !== undefined && (
             <div className="mb-2">
               <div className="mb-1 text-[10px] uppercase tracking-wide text-zinc-500">{tr('参数', 'Arguments')}</div>
@@ -340,6 +356,59 @@ function ToolCallSummaryBlock({
         </div>
       )}
     </div>
+  );
+}
+
+function WorkerSteps({ turn, message, messages }: { turn: WorkerTurn; message: ChatMessage; messages?: ChatMessage[] }) {
+  const { tr } = useI18n();
+  const { session } = turn;
+  const [history, setHistory] = useState<ChatMessage[]>();
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    setHistory(undefined);
+    setFailed(false);
+    getMessages(session, controller.signal).then(({ items }) => {
+      if (controller.signal.aborted) return;
+      setHistory(items);
+    }).catch(() => { if (!controller.signal.aborted) setFailed(true); });
+    return () => controller.abort();
+  }, [session, attempt]);
+
+  const end = Date.parse(message.created_at ?? '');
+  const duration = message.tool_call?.duration_ms;
+  // Go truncates durations to milliseconds and JS truncates the end timestamp.
+  const start = duration == null ? -Infinity : end - duration - 1;
+  // Concurrent calls share a worker transcript. Neither card can claim its tools.
+  const overlaps = !turn.initial && messages?.some(other => {
+    if (other.id === message.id || other.tool_call?.name !== 'SendMessage') return false;
+    const call = other.tool_call;
+    const args = call.arguments ?? safeParse(call.arguments_raw ?? '');
+    if (workerTurn(call.name, args, undefined)?.session !== session) return false;
+    const time = Date.parse(other.created_at ?? '');
+    if (call.status === 'pending') return !Number.isFinite(time) || time <= end;
+    return time >= start && time - (call.duration_ms ?? 0) <= end;
+  });
+  const steps = history && !overlaps ? workerTurnSteps(history, turn, start, end) : undefined;
+
+  return (
+    <section className="mb-3 min-w-0 space-y-2" aria-label={tr('执行步骤', 'Execution steps')}>
+      <h4 className="font-medium text-zinc-300">{tr('执行步骤', 'Execution steps')}{steps && ` (${steps.length})`}</h4>
+      {failed ? <div className="flex items-center gap-2 text-zinc-400">
+        {tr('未能读取本轮步骤', 'Steps unavailable for this turn')}
+        <Button size="sm" variant="link" onClick={() => setAttempt(n => n + 1)}>{tr('重试', 'Retry')}</Button>
+      </div> : !history ? <span role="status" className="text-zinc-400">{tr('正在读取步骤…', 'Loading steps…')}</span>
+        : !steps ? <span className="text-zinc-400">{tr('无法从历史记录确认本轮步骤', 'Cannot identify this turn’s steps in the transcript')}</span>
+        : steps.length === 0 ? <span className="text-zinc-400">{tr('本轮没有工具调用', 'No tools called in this turn')}</span>
+          : <ol className="space-y-1.5">{steps.map(step => {
+            const call = step.tool_call ? fromSummary(step.tool_call) : {
+              name: step.tool_name ?? 'tool', result: step.content ? safeParse(step.content) : undefined,
+            };
+            return <li key={step.id}><ToolCallSummaryBlock workerStep sessionId={session}
+              call={{ ...call, result_id: step.tool_call?.result_id ?? step.result_id }} /></li>;
+          })}</ol>}
+    </section>
   );
 }
 

@@ -29,6 +29,74 @@ afterEach(() => {
   setLocale('zh-CN');
 });
 
+describe('completed worker calls', () => {
+  it('loads only on expand and keeps each follow-up separate after reload', async () => {
+    const at = (second: number) => new Date(2026, 10, 19, 8, 0, second).toISOString();
+    const user = (s: number, content: string): ChatMessage => ({ id: String(s), role: 'user', content, created_at: at(s) });
+    const tool = (s: number, name: string): ChatMessage => ({ id: String(s), role: 'tool', tool_name: name, created_at: at(s) });
+    const read = vi.spyOn(chatApi, 'getMessages').mockResolvedValue({ total: 6, items: [
+      user(1, 'initial'), tool(2, 'initial_query'), user(4, 'check again'), tool(5, 'metric_query'),
+      user(7, 'check again'), tool(8, 'later_query'),
+    ] });
+    try {
+      const first: ChatMessage = { id: 'first', role: 'tool', created_at: at(3), tool_call: {
+        name: 'AgentTool', status: 'success', arguments_raw: '{"prompt":"initial"}',
+        result: { kind: 'tool_result', preview: '{"task_id":"agent-1234abcd","result":"truncated' },
+      } };
+      const next: ChatMessage = { id: 'next', role: 'tool', created_at: at(6), tool_call: {
+        name: 'SendMessage', status: 'success', duration_ms: 2500, arguments_raw: '{"to":"agent-1234abcd","message":"check again"}',
+      } };
+      const view = render(<MessageBubble sessionId="parent" message={first} />);
+      expect(read).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole('button', { name: '工具调用 AgentTool' }));
+      expect(await screen.findByRole('button', { name: '工具调用 initial_query' })).toBeVisible();
+      expect(screen.queryByRole('button', { name: '工具调用 metric_query' })).toBeNull();
+      view.unmount();
+      render(<MessageBubble sessionId="parent" message={next} />);
+      const card = screen.getByRole('button', { name: '工具调用 SendMessage' });
+      expect(card).toHaveAttribute('aria-expanded', 'false');
+      fireEvent.click(card);
+      expect(await screen.findByRole('button', { name: '工具调用 metric_query' })).toBeVisible();
+      expect(screen.queryByRole('button', { name: '工具调用 initial_query' })).toBeNull();
+      expect(screen.queryByRole('button', { name: '工具调用 later_query' })).toBeNull();
+      expect(read).toHaveBeenLastCalledWith('worker-1234abcd', expect.any(AbortSignal));
+      fireEvent.click(card);
+      expect(screen.queryByRole('region', { name: '执行步骤' })).toBeNull();
+    } finally {
+      read.mockRestore();
+    }
+  });
+
+  it('does not attribute older or overlapping work to a follow-up', async () => {
+    const at = (second: number) => new Date(2026, 10, 19, 8, 0, second).toISOString();
+    const call = { name: 'SendMessage', status: 'success' as const, duration_ms: 3000,
+      arguments: { to: 'agent-1234abcd', message: 'check again' } };
+    const previous: ChatMessage = { id: 'previous', role: 'tool', created_at: at(6), tool_call: call };
+    const current: ChatMessage = { id: 'current', role: 'tool', created_at: at(8), tool_call: call };
+    const read = vi.spyOn(chatApi, 'getMessages').mockResolvedValue({ total: 5, items: [
+      { id: '1', role: 'user', content: 'initial', created_at: at(1) },
+      { id: '2', role: 'user', content: 'check again', created_at: at(3) },
+      { id: '3', role: 'user', content: 'check again', created_at: at(5) },
+      { id: '4', role: 'tool', tool_name: 'older_query', created_at: at(6) },
+      { id: '5', role: 'tool', tool_name: 'newer_query', created_at: at(7) },
+    ] });
+    try {
+      const view = render(<MessageBubble message={current} messages={[previous, current]} />);
+      fireEvent.click(screen.getByRole('button', { name: '工具调用 SendMessage' }));
+      const unavailable = '无法从历史记录确认本轮步骤';
+      expect(await screen.findByText(unavailable)).toBeVisible();
+      expect(screen.queryByRole('button', { name: /工具调用 .*_query/ })).toBeNull();
+      const failed: ChatMessage = { ...current, id: 'rejected', created_at: at(20),
+        tool_call: { ...call, status: 'error', duration_ms: 0 } };
+      view.rerender(<MessageBubble message={failed} messages={[previous, current, failed]} />);
+      expect(screen.getByText(unavailable)).toBeVisible();
+      expect(screen.queryByRole('button', { name: /工具调用 .*_query/ })).toBeNull();
+    } finally {
+      read.mockRestore();
+    }
+  });
+});
+
 describe('MessageBubble image preview', () => {
   it('opens a protected message image on click', async () => {
     URL.revokeObjectURL = vi.fn();

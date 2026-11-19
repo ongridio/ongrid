@@ -364,11 +364,16 @@ func (rt *Runtime) SendToWorker(ctx context.Context, workerID, message string) e
 	w.mu.Lock()
 	w.Status = WorkerStatusRunning
 	sessID := w.SessionID
+	parentSession := w.ParentSessionID
 	w.mu.Unlock()
 
-	// SendToWorker has no SpawnRequest; inherit locale from ctx
-	// (chat coordinator threads it via basetool.WithLocale).
-	result, err := rt.runWorker(ctx, agentDef, sessID, message, basetool.LocaleFromContext(ctx), nil, w.ID)
+	// A follow-up can arrive on a later turn. Use that turn's stream only
+	// when it belongs to the worker's parent chat.
+	var parentEmit Emit
+	if parentSession != "" && parentSession == basetool.SessionIDFromContext(ctx) {
+		parentEmit = EmitFromContext(ctx)
+	}
+	result, err := rt.runWorker(ctx, agentDef, sessID, message, basetool.LocaleFromContext(ctx), parentEmit, w.ID)
 
 	w.mu.Lock()
 	defer w.mu.Unlock()
