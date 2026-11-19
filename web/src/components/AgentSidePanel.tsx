@@ -271,7 +271,7 @@ function FloatingAssistant() {
           <div role="log" aria-live="polite" className="space-y-3 break-words px-4">
             {messages.filter(m => m.role !== 'system' && (m.role !== 'assistant' || m.content || m.tool_calls?.length)).map(m => <div key={m.id} className="first:pt-4">
               {m.role === 'assistant' && <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold"><img src="/favicon.svg" alt="" width={16} height={16}/>{tr('Ongrid 助理', 'Ongrid assistant')}</div>}
-              <MessageBubble message={m} sessionId={sessionId} hideActiveOperations/>
+              <MessageBubble message={m} messages={messages} sessionId={sessionId} hideActiveOperations/>
             </div>)}
           </div>
           <div className="px-4">

@@ -129,6 +129,56 @@ func TestWorkerToolContextUsesOwnSessionOnSpawnAndFollowup(t *testing.T) {
 	}
 }
 
+func TestSendToWorker_ForwardsToolEventsToCurrentParentStream(t *testing.T) {
+	for _, caller := range []string{"parent", "other-chat"} {
+		t.Run(caller, func(t *testing.T) {
+			scripted := newScriptedChatModel(
+				schema.AssistantMessage("first result", nil),
+				schema.AssistantMessage("checking again", []schema.ToolCall{{
+					ID: "followup-metric", Type: "function",
+					Function: schema.FunctionCall{Name: "query_promql", Arguments: `{}`},
+				}}),
+				schema.AssistantMessage("follow-up result", nil),
+			)
+			store, parent := newSeededRuntimeStore(t, 7)
+			rt := newRuntimeWithStore(t, "specialist-sre", scripted, []basetool.BaseTool{
+				&fakeTool{name: "query_promql", schema: `{"type":"object"}`},
+			}, store)
+			w, err := rt.SpawnWorker(t.Context(), SpawnRequest{AgentName: "specialist-sre", ParentSession: parent, Prompt: "initial check"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			sessionID := caller
+			if caller == "parent" {
+				sessionID = parent
+			}
+			ctx := basetool.WithSessionID(t.Context(), sessionID)
+			var events []Event
+			ctx = withEmit(ctx, func(ev Event) { events = append(events, ev) })
+			if err := rt.SendToWorker(ctx, w.ID, "check again"); err != nil {
+				t.Fatal(err)
+			}
+			if caller != "parent" {
+				if len(events) != 0 {
+					t.Fatalf("unrelated chat received worker events: %+v", events)
+				}
+				return
+			}
+			if len(events) != 2 || events[0].Type != EventToolStart || events[1].Type != EventToolEnd {
+				t.Fatalf("want tool start then end on the follow-up stream, got %+v", events)
+			}
+			for _, ev := range events {
+				if ev.Tool == nil || ev.Tool.Name != "query_promql" || ev.Tool.ToolCallID != w.ID+":followup-metric" {
+					t.Fatalf("unexpected worker tool event: %+v", ev.Tool)
+				}
+			}
+			if events[1].Tool.Status != "success" {
+				t.Fatalf("follow-up tool status = %q", events[1].Tool.Status)
+			}
+		})
+	}
+}
+
 func TestSpawnWorker_Sync_ForwardsWorkerToolEventsToParent(t *testing.T) {
 	scripted := newScriptedChatModel(
 		&schema.Message{
