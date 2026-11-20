@@ -21,4 +21,4 @@ Manager 读取供应商模型目录中的总窗口、输入和输出限制。目
 
 GORM 在 `chat_sessions` 增加可空摘要与快照、窗口偏好、运行归属和修订号。旧会话无需回填。首次整理超长历史需扫描并归纳旧消息，耗时取决于历史长度及模型。SQLite 按创建时间和消息 ID 做稳定分页。MySQL 使用相同的游标，由部署方按现有升级流程评估 DDL 锁表时间。降级的 Manager 会忽略新增列。
 
-型号规格可核对 [OpenAI](https://developers.openai.com/api/docs/models/gpt-6.2-astra)、[Claude](https://platform.claude.com/docs/en/models/overview)、[DeepSeek](https://api-docs.deepseek.com/api/list-models/) 和 [Gemini](https://ai.google.dev/gemini-api/docs/models/gemini-2.5-pro)。
+型号规格可核对 [OpenAI](https://developers.openai.com/api/docs/models/gpt-6.2-astra)、[Claude](https://platform.claude.com/docs/en/models/overview)、[DeepSeek](https://api-docs.deepseek.com/api/list-models/)、[Gemini](https://ai.google.dev/gemini-api/docs/models/gemini-2.5-pro)、[小米 MiMo](https://mimo.mi.com/docs/en-US/tokenplan/integration/opencode) 和 [智谱 GLM](https://docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3-flash)。

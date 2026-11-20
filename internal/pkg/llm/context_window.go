@@ -83,9 +83,14 @@ func providerWindows(p ProviderConfig, catalog map[string]CatalogModel) map[stri
 				ProviderOpenAI: {"api.openai.com"}, ProviderDeepSeek: {"api.deepseek.com"}, ProviderAnthropic: {"api.anthropic.com"},
 				ProviderGemini: {"generativelanguage.googleapis.com"}, ProviderKimi: {"api.moonshot.cn", "api.moonshot.ai"},
 				ProviderMiniMax: {"api.minimax.io", "api.minimaxi.com"}, ProviderZhipu: {"open.bigmodel.cn", "api.z.ai"},
+				ProviderXiaomi: {"api.xiaomimimo.com", "token-plan-cn.xiaomimimo.com", "token-plan-sgp.xiaomimimo.com", "token-plan-ams.xiaomimimo.com"},
 			}
 			if (p.ID == ProviderOpenAI && host == "" && p.BaseURL == "") || slices.Contains(official[p.ID], host) {
-				c = builtinWindow(p.ID, id)
+				spec := builtinWindow(p.ID, id)
+				if c.Output > 0 && (spec.Output == 0 || c.Output < spec.Output) {
+					spec.Output = c.Output
+				}
+				c = spec
 			}
 		}
 		if limit := p.WindowLimits[id]; limit >= 1024 && limit <= 16<<20 && (c.Maximum() == 0 || limit < c.Maximum()) {
@@ -119,6 +124,8 @@ func builtinWindow(provider, model string) WindowCapability {
 		{ProviderAnthropic, "claude-opus-4 claude-opus-4-1", 200000, 32000},
 		{ProviderGemini, "gemini-2.5-pro", 1048576, 65536},
 		{ProviderZhipu, "glm-4.7 glm-4.7-flashx", 200000, 128000},
+		{ProviderZhipu, "glm-5.3-flash glm-5.3-flashx", 1048576, 131072},
+		{ProviderXiaomi, "mimo-v2.6-flash mimo-v2.6-pro mimo-v2.6-pro-ultraspeed", 1048576, 131072},
 		{ProviderDeepSeek, "deepseek-flash deepseek-v4-flash deepseek-v4-pro", 1000000, 384000},
 		{ProviderMiniMax, "minimax-m3 minimax-m3.1-flash", 1000000, 0},
 		{ProviderMiniMax, "minimax-m2.5", 196608, 0},

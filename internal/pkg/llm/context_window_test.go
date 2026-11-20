@@ -5,6 +5,33 @@ import (
 	"testing"
 )
 
+func TestModelWindowWhenCatalogOmitsCapacity(t *testing.T) {
+	for _, tc := range []struct{ provider, host, model string }{
+		{ProviderXiaomi, "api.xiaomimimo.com", "mimo-v2.6-flash"},
+		{ProviderXiaomi, "token-plan-cn.xiaomimimo.com", "mimo-v2.6-pro"},
+		{ProviderXiaomi, "token-plan-sgp.xiaomimimo.com", "mimo-v2.6-pro"},
+		{ProviderXiaomi, "token-plan-ams.xiaomimimo.com", "mimo-v2.6-pro-ultraspeed"},
+		{ProviderZhipu, "open.bigmodel.cn", "glm-5.3-flash"},
+	} {
+		t.Run(tc.host, func(t *testing.T) {
+			p := ProviderConfig{ID: tc.provider, Model: tc.model, BaseURL: "https://" + tc.host}
+			c := providerWindows(p, nil)[p.Model]
+			window, _, _ := c.Budget(0)
+			if c.Source != "model_spec" || c.Output != 131072 || window != 256000 || !c.Supports(1048576) {
+				t.Fatalf("missing official capability: %+v", c)
+			}
+			catalog := map[string]CatalogModel{p.Model: {Window: WindowCapability{Output: 4096}}}
+			if got := providerWindows(p, catalog)[p.Model]; got.Total != c.Total || got.Output != 4096 {
+				t.Fatalf("lost deployment output cap: %+v", got)
+			}
+			p.BaseURL = "https://" + tc.host + ".example"
+			if got := providerWindows(p, nil)[p.Model]; got.Maximum() != 0 {
+				t.Fatalf("unverified endpoint received official capability: %+v", got)
+			}
+		})
+	}
+}
+
 func TestContextWindowCapacity(t *testing.T) {
 	cases := []struct {
 		name                            string
