@@ -932,6 +932,14 @@ html.light .og-chip[data-tone="accent"] { color: rgb(67 56 202); }
   position: fixed; z-index: 40; pointer-events: none;
   inset: max(16px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
 }
+/* Leave the chat controls reachable when the launcher and composer share the same column. */
+@media (max-width: 1535px) {
+  .og-thread-composer { anchor-name: --thread-composer; }
+  body:has(.og-thread-composer) .og-assistant-bounds {
+    bottom: 10rem;
+    bottom: calc(anchor(--thread-composer top, 10rem) + 8px);
+  }
+}
 .og-assistant-launcher {
   position: absolute; right: 0; bottom: 0; pointer-events: auto;
   touch-action: none; user-select: none; cursor: grab;

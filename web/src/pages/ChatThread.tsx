@@ -725,8 +725,8 @@ export default function ChatThreadPage() {
           </div>
         </div>
 
-        <div className="bg-zinc-950/80 px-6 py-4">
-          <div className="mx-auto w-full max-w-3xl space-y-2">
+        <div className="bg-zinc-950/80 px-2 py-4 sm:px-6">
+          <div className="og-thread-composer mx-auto w-full max-w-3xl space-y-2">
             {isViewer && (
               <div
                 role="status"
@@ -739,6 +739,7 @@ export default function ChatThreadPage() {
               </div>
             )}
             <ChatInput
+              key={sessionId}
               onSubmit={(p: SubmitPayload) => void send(p.text, p.mentions, { attachments: p.attachments })}
               allowAttachments
               disabled={submitting}

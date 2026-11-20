@@ -50,11 +50,13 @@ export function ModelDropdown({
     enabled: 'On', minimal: 'Minimal', low: 'Low',
     medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max',
   };
-  return <div className="flex min-w-0 flex-wrap items-center gap-1">
+  return <div className="flex min-w-0 items-center gap-0.5">
+  {contextEnabled && selected && capability &&
+    <ContextUsageIndicator selected={selected} capability={capability} usage={usage} onPick={onPick} disabled={disabled}/>}
   <Select
     open={open} onOpenChange={setOpen} disabled={disabled} label={tr('选择模型', 'Select model')}
     value={value}
-    options={options} searchable variant="inline" className="h-8 w-auto max-w-full"
+    options={options} searchable variant="inline" className="h-8 w-auto max-w-full gap-1 px-1 max-sm:[&>svg:first-child]:hidden sm:px-1.5"
     onValueChange={(value) => {
       const [provider, model] = JSON.parse(value) as [string, string];
       onPick?.({ provider, model, reasoning_effort: '' });
@@ -63,12 +65,10 @@ export function ModelDropdown({
   />
   {selected && levels.length > 0 && <Select
     disabled={disabled} label={tr('推理级别', 'Reasoning effort')}
-    value={chatReasoningEffort(selected.reasoning_effort) || ''} variant="inline" className="h-8 w-auto max-w-full"
+    value={chatReasoningEffort(selected.reasoning_effort) || ''} variant="inline" className="h-8 w-auto shrink-0 gap-1 px-1 sm:px-1.5"
     options={[{ value: '', label: 'Default' }, ...levels.map(level => ({ value: level, label: labels[level] ?? level }))]}
     onValueChange={reasoning_effort => onPick?.({ ...selected, reasoning_effort })}
   />}
-  {contextEnabled && selected && capability &&
-    <ContextUsageIndicator selected={selected} capability={capability} usage={usage} onPick={onPick} disabled={disabled}/>}
   </div>;
 }
 
@@ -91,7 +91,7 @@ export function WebSearchToggle({
       aria-label={enabled ? tr('关闭联网搜索', 'Disable web search') : tr('开启联网搜索', 'Enable web search')}
       title={enabled ? tr('关闭联网搜索', 'Disable web search') : tr('开启联网搜索', 'Enable web search')}
       onClick={() => onToggle(!enabled)}
-      className={cn('w-7 p-0', enabled
+      className={cn('w-7 shrink-0 p-0', enabled
         ? 'text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300'
         : 'text-text-muted hover:text-text')}
     >

@@ -21,7 +21,7 @@ export async function checkReasoningPickerLayout(page, screenshots) {
           const effortLabel = locale === 'zh-CN' ? '推理级别' : 'Reasoning effort';
           await page.waitForFunction(label => !!document.querySelector(`button[aria-label="${label}"]`), effortLabel);
           const boxes = await page.evaluate(() => {
-            const labels = ['选择模型', 'Select model', '推理级别', 'Reasoning effort', '发送消息', 'Send message', '发送', 'Send', '添加图片', 'Add images'];
+            const labels = ['选择模型', 'Select model', '推理级别', 'Reasoning effort', '发送消息', 'Send message', '发送', 'Send', '添加附件', 'Add attachments'];
             return { width: innerWidth, scroll: document.documentElement.scrollWidth, controls: [...document.querySelectorAll('button')]
               .filter(el => labels.includes(el.getAttribute('aria-label')) && el.getBoundingClientRect().width > 0)
               .map(el => { const r = el.getBoundingClientRect(); return { label: el.getAttribute('aria-label'), left: r.left, right: r.right, top: r.top, bottom: r.bottom }; }) };

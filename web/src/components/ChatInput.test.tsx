@@ -129,6 +129,20 @@ describe('ChatInput image attachments', () => {
   });
 });
 
+it('keeps the draft intact when a text file is too large or contains invalid UTF-8', async () => {
+  render(<MemoryRouter><ChatInput value="check the logs" allowAttachments onSubmit={vi.fn()} /></MemoryRouter>);
+  const picker = screen.getByLabelText('Choose a text file');
+  const oversized = new File([new Uint8Array(128 * 1024 + 1)], 'service.log');
+  fireEvent.change(picker, { target: { files: [oversized] } });
+  expect(screen.getByRole('alert')).toHaveTextContent('128 KiB');
+
+  const binary = new File([], 'invalid.txt');
+  binary.arrayBuffer = async () => Uint8Array.of(0xff).buffer;
+  fireEvent.change(picker, { target: { files: [binary] } });
+  await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('UTF-8'));
+  expect(screen.getByRole('textbox')).toHaveValue('check the logs');
+});
+
 it('toggles web search directly from the globe button', () => {
   const onToggle = vi.fn();
   const view = (enabled: boolean) => <MemoryRouter><ChatInput onSubmit={vi.fn()} webSearchEnabled={enabled} onWebSearchToggle={onToggle} /></MemoryRouter>;

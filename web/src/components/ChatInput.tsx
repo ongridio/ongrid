@@ -1,4 +1,4 @@
-import { Button, Label, Textarea } from '@/components/ui';
+import { Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, Label, Textarea } from '@/components/ui';
 import { ModelDropdown, WebSearchToggle } from '@/components/ChatModelControls';
 import {
   useEffect,
@@ -7,9 +7,7 @@ import {
   type KeyboardEvent,
 } from 'react';
 import {
-  Send,
-  // Paperclip / Puzzle removed when the home toolbar's attachments +
-  // plugins picker was parked — see todo/home-chat-toolbar.md.
+  ArrowUp,
   Mail,
   Github,
   Slack,
@@ -19,7 +17,8 @@ import {
   AlertTriangle,
   Bell,
   FileText,
-  Paperclip,
+  ImagePlus,
+  Plus,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { isImeComposing } from '@/lib/keyboard';
@@ -81,6 +80,8 @@ const MAX_IMAGES = 4;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_TOTAL_IMAGE_BYTES = 20 * 1024 * 1024;
 const ACCEPTED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+const TEXT_EXTENSIONS = ['.txt', '.log', '.md', '.csv', '.json', '.yaml', '.yml'];
+const MAX_TEXT_BYTES = 128 * 1024;
 
 export function ChatInput({
   value: controlled,
@@ -109,6 +110,8 @@ export function ChatInput({
   const ref = useRef<HTMLTextAreaElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const textFileRef = useRef<HTMLInputElement | null>(null);
+  const [readingFile, setReadingFile] = useState(false);
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [previewAttachment, setPreviewAttachment] = useState<PendingAttachment | null>(null);
   const [attachmentError, setAttachmentError] = useState('');
@@ -258,6 +261,30 @@ export function ChatInput({
     setChips((prev) => prev.filter((_, i) => i !== idx));
   }
 
+  async function insertTextFile(file: File) {
+    setAttachmentError('');
+    if (!TEXT_EXTENSIONS.some(ext => file.name.toLowerCase().endsWith(ext)) || file.size > MAX_TEXT_BYTES) {
+      setAttachmentError(tr('请选择 128 KiB 以内的 TXT、LOG、MD、CSV、JSON 或 YAML 文件', 'Choose a TXT, LOG, MD, CSV, JSON, or YAML file up to 128 KiB'));
+      return;
+    }
+    setReadingFile(true);
+    try {
+      const text = new TextDecoder('utf-8', { fatal: true }).decode(await file.arrayBuffer());
+      if (!text.trim() || text.includes('\0')) {
+        setAttachmentError(tr('文件为空或包含二进制内容', 'The file is empty or contains binary data'));
+        return;
+      }
+      const input = ref.current;
+      if (!input) return;
+      setValue([input.value, file.name + '\n' + text].filter(Boolean).join('\n\n'));
+      input.focus();
+    } catch {
+      setAttachmentError(tr('无法读取文件，请选择 UTF-8 文本文件', 'Could not read this file. Choose a UTF-8 text file.'));
+    } finally {
+      setReadingFile(false);
+    }
+  }
+
   async function addImageFiles(files: FileList | File[]) {
     const incoming = Array.from(files);
     setAttachmentError('');
@@ -288,7 +315,7 @@ export function ChatInput({
 
   const submit = () => {
     const trimmed = value.trim();
-    if ((!trimmed && attachments.length === 0) || disabled) return;
+    if ((!trimmed && attachments.length === 0) || disabled || readingFile) return;
     onSubmit({ text: trimmed, mentions: chips, attachments: attachments.map((item) => item.file) });
     if (controlled === undefined) setInternal('');
     setChips([]);
@@ -398,7 +425,14 @@ export function ChatInput({
         }}
       >
         {allowAttachments && (
-          <input ref={fileInputRef} type="file" accept=".png,.jpg,.jpeg,.webp" multiple className="sr-only" aria-label={tr('选择图片', 'Choose images')} onChange={(event) => { if (event.target.files) void addImageFiles(event.target.files); event.target.value = ''; }} />
+          <>
+            <input ref={fileInputRef} type="file" accept=".png,.jpg,.jpeg,.webp" multiple hidden aria-label={tr('选择图片', 'Choose images')} onChange={(event) => { if (event.target.files) void addImageFiles(event.target.files); event.target.value = ''; }} />
+            <input ref={textFileRef} type="file" accept={TEXT_EXTENSIONS.join(',')} hidden aria-label={tr('选择文本文件', 'Choose a text file')} onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = '';
+              if (file) void insertTextFile(file);
+            }} />
+          </>
         )}
         {attachments.length > 0 && (
           <div className="flex flex-wrap gap-2 px-4 pt-4" aria-label={tr('待发送图片', 'Images to send')}>
@@ -471,8 +505,26 @@ export function ChatInput({
           />
         )}
 
-        <div className="flex items-center justify-between gap-2 px-3 pb-3 pt-1">
-          <div className="og-composer-actions flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+        <div className="og-composer-actions flex items-center px-2 pb-3 pt-1 sm:gap-1 sm:px-3">
+          {allowAttachments && (
+            <DropdownMenu>
+              <DropdownMenuTrigger render={<Button variant="plain" size="sm" />} disabled={disabled || readingFile}
+                aria-label={tr('添加附件', 'Add attachments')} title={tr('添加附件', 'Add attachments')}
+                className="w-7 shrink-0 p-0 text-text-muted hover:text-text">
+                <Plus size={18} />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent side="top" sideOffset={8}>
+                <DropdownMenuItem onClick={() => fileInputRef.current?.click()} disabled={attachments.length >= MAX_IMAGES}>
+                  <ImagePlus size={15} />{tr('上传图片', 'Upload images')}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => textFileRef.current?.click()}>
+                  <FileText size={15} />{tr('插入文本文件', 'Insert text file')}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+          {onWebSearchToggle && <WebSearchToggle enabled={!!webSearchEnabled} onToggle={onWebSearchToggle} />}
+          <div className="ml-auto flex min-w-0 items-center justify-end">
             <ModelDropdown
               providers={providers ?? []}
               contextEnabled={contextEnabled} usage={contextUsage}
@@ -480,29 +532,20 @@ export function ChatInput({
               onPick={onModelChange}
               disabled={disabled}
             />
-            <WebSearchToggle
-              enabled={!!webSearchEnabled}
-              onToggle={(v) => onWebSearchToggle?.(v)}
-            />
-            {allowAttachments && (
-              <Button variant="plain" size="sm" type="button" disabled={disabled || attachments.length >= MAX_IMAGES} aria-label={tr('添加图片', 'Add images')} title={tr('添加图片', 'Add images')} className="h-6 w-6 p-0 text-text-muted hover:text-text" onClick={() => fileInputRef.current?.click()}>
-                <Paperclip size={14} />
-              </Button>
-            )}
           </div>
           <Button variant="subtle" size="sm"
             type="button"
             onClick={submit}
-            disabled={disabled || empty}
+            disabled={disabled || empty || readingFile}
             aria-label={tr('发送消息', 'Send message')}
             className={cn(
-              'inline-flex h-9 w-9 items-center justify-center rounded-full transition-all',
+              'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors',
               empty || disabled
                 ? 'bg-zinc-800 text-zinc-500'
                 : 'bg-zinc-100 text-zinc-900 hover:bg-white'
             )}
           >
-            <Send size={15} />
+            <ArrowUp size={16} />
           </Button>
         </div>
       </div>
