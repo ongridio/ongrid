@@ -25,7 +25,7 @@ type Props = {
   open?: boolean;
   onOpenChange?(open: boolean): void;
   className?: string;
-  variant?: 'default' | 'ghost';
+  variant?: 'default' | 'ghost' | 'inline';
 };
 
 // Existing forms can keep their dynamic <option> children while using the same

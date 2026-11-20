@@ -295,7 +295,7 @@ function FloatingAssistant() {
           <div className="rounded-lg border border-border px-3 pb-2 pt-2.5 focus-within:border-accent">
             <Textarea ref={input} variant="inset" rows={2} className="block w-full resize-none text-sm" aria-label={tr('你的问题', 'Your question')} value={draft} onChange={e => edit(e.target.value)} onKeyDown={onKeyDown} title={tr('Shift + Enter 换行', 'Shift + Enter for a new line')} placeholder={tr('问问当前页面，或描述你的问题…', 'Ask about this view, or describe your question…')} disabled={busy || uncertain}/>
             <div className="mt-1 flex items-center gap-1">
-              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+              <div className="og-composer-actions flex min-w-0 flex-1 flex-wrap items-center gap-1">
                 {catalogFailed ? <Button variant="link" onClick={() => setCatalogAttempt(n => n + 1)}>
                   {tr('重新加载模型', 'Reload models')}
                 </Button> : catalog ? <ModelDropdown contextEnabled={(sessionId ? sessionVersion : catalog.runtime_version) === 'v3'} usage={contextUsage} providers={catalog.providers ?? []} selected={selectedModel} onPick={pickModel} disabled={locked}/>

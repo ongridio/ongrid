@@ -472,7 +472,7 @@ export function ChatInput({
         )}
 
         <div className="flex items-center justify-between gap-2 px-3 pb-3 pt-1">
-          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+          <div className="og-composer-actions flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
             <ModelDropdown
               providers={providers ?? []}
               contextEnabled={contextEnabled} usage={contextUsage}
@@ -485,7 +485,7 @@ export function ChatInput({
               onToggle={(v) => onWebSearchToggle?.(v)}
             />
             {allowAttachments && (
-              <Button variant="subtle" size="sm" type="button" disabled={disabled || attachments.length >= MAX_IMAGES} aria-label={tr('添加图片', 'Add images')} title={tr('添加图片', 'Add images')} className="h-6 w-6 p-0" onClick={() => fileInputRef.current?.click()}>
+              <Button variant="plain" size="sm" type="button" disabled={disabled || attachments.length >= MAX_IMAGES} aria-label={tr('添加图片', 'Add images')} title={tr('添加图片', 'Add images')} className="h-6 w-6 p-0 text-text-muted hover:text-text" onClick={() => fileInputRef.current?.click()}>
                 <Paperclip size={14} />
               </Button>
             )}

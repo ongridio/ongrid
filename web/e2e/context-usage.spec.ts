@@ -22,7 +22,7 @@ for (const width of [390, 768, 1280, 1920]) {
       await page.route('**/api/**', route => {
         const path = new URL(route.request().url()).pathname;
         if (path.endsWith('/aiops/models')) return route.fulfill({ json: { default: selected, runtime_version: 'v3',
-          providers: [{ id: selected.provider, models: [model], context_windows: {
+          providers: [{ id: selected.provider, models: [model], reasoning_efforts: { [model]: ['medium', 'high'] }, context_windows: {
             [model]: { auto: 256000, source: 'provider', options: [128000, 256000] },
           } }] } });
         if (path.endsWith('/chat/sessions')) return route.fulfill({ json: { items: [session], total: 1 } });
@@ -33,7 +33,27 @@ for (const width of [390, 768, 1280, 1920]) {
       await page.goto('/chat/window-test');
       const title = zh ? '上下文用量' : 'Context usage';
       const trigger = page.getByRole('button', { name: title });
+      const transparent = 'rgba(0, 0, 0, 0)';
+      for (const name of [zh ? '选择模型' : 'Select model', zh ? '推理级别' : 'Reasoning effort']) {
+        const picker = page.getByRole('combobox', { name, exact: true });
+        await picker.hover();
+        await expect(picker).toHaveCSS('background-color', transparent);
+        await picker.click();
+        await expect(picker).toHaveAttribute('aria-expanded', 'true');
+        await expect(picker).toHaveCSS('background-color', transparent);
+        await page.keyboard.press('Escape');
+        await expect(picker).toBeFocused();
+        await expect(picker).toHaveCSS('outline-style', 'solid');
+      }
+      const search = page.getByRole('switch');
+      await search.click();
+      await expect(search).toHaveCSS('background-color', transparent);
+      await search.click();
+      await expect(search).toHaveCSS('background-color', transparent);
+      await page.getByRole('combobox', { name: zh ? '选择模型' : 'Select model', exact: true }).hover();
+      await page.screenshot({ path: test.info().outputPath('model-hover.png') });
       await trigger.click();
+      await expect(trigger).toHaveCSS('background-color', transparent);
       const panel = page.getByRole('dialog', { name: title });
       await expect(panel.getByText('15.1%')).toBeVisible();
       const coverage = await panel.getByRole('meter').evaluate(el =>

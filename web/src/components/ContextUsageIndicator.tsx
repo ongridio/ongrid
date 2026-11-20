@@ -33,9 +33,9 @@ export function ContextUsageIndicator({ capability, selected, usage, disabled, o
   ] : [];
 
   return <Popover>
-    <PopoverTrigger render={<Button variant="subtle" size="sm" />}
+    <PopoverTrigger render={<Button variant="plain" size="sm" />}
       aria-label={label} aria-description={hint} title={hint}
-      className="min-w-7 gap-1.5 px-1.5 text-text-muted">
+      className="min-w-7 gap-1.5 px-1.5 text-text-muted hover:text-text aria-expanded:text-text">
       <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden="true">
         <circle cx="10" cy="10" r="7.5" stroke="currentColor" strokeWidth="2.5" opacity=".3" />
         {ratio !== undefined && ratio > 0 && <circle cx="10" cy="10" r="7.5" stroke="currentColor" strokeWidth="2.5"
@@ -78,7 +78,7 @@ export function ContextUsageIndicator({ capability, selected, usage, disabled, o
       {!capability.source && <p className="my-2 text-xs text-text-muted">{tr('部署未提供容量，采用保守预算。', 'This deployment uses a fallback budget because its capacity is unknown.')}</p>}
       <div className="flex items-center justify-between gap-2 border-t border-border-soft pt-2">
         <span className="text-xs text-text-muted">{tr('上下文窗口', 'Context window')}</span>
-        <Select label={tr('上下文窗口', 'Context window')} variant="ghost" className="max-w-full"
+        <Select label={tr('上下文窗口', 'Context window')} variant="inline" className="max-w-full"
           disabled={disabled || !onPick || !capability.options?.length} value={String(selected.context_window_tokens || 0)}
           options={[{ value: '0', label: tr(`自动 · ${format(capability.auto)}`, `Auto · ${format(capability.auto)}`) },
             ...(capability.options ?? []).map(n => ({ value: String(n), label: format(n) }))]}

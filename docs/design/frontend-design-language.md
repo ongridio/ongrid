@@ -126,7 +126,7 @@ import { FilterField, Input, Label, Select } from '@/components/ui';
 </div>
 ```
 
-`Select` 默认按内容宽度排列，表单需要撑满列时加 `className="w-full"`。`onValueChange` 返回字符串，数字字段在调用方转换。选项超过 10 个时默认启用搜索，也可显式设置 `searchable`；聊天模型等低强调入口使用 `variant="ghost"`。不要给隐藏输入派发 `change` 模拟用户选择，测试应实际打开菜单并选择选项。
+`Select` 默认按内容宽度排列，表单需要撑满列时加 `className="w-full"`。`onValueChange` 返回字符串，数字字段在调用方转换。选项超过 10 个时默认启用搜索，也可显式设置 `searchable`；聊天输入框里的模型、推理等级和窗口选择使用 `variant="inline"`。这些入口在悬停和展开时保持背景透明，通过文字和图标颜色反馈，键盘操作保留焦点轮廓。不要给隐藏输入派发 `change` 模拟用户选择，测试应实际打开菜单并选择选项。
 
 ## 弹层、导航与交互
 
