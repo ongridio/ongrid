@@ -43,7 +43,10 @@ const (
 
 // Event is the streaming envelope. Exactly one of the optional pointer
 // fields is set, depending on Type.
+const EventContextUsage EventType = "context_usage"
+
 type Event struct {
+	ContextUsage *model.ContextUsage
 	Type         EventType
 	Assistant    *AssistantEvent
 	Tool         *ToolEvent

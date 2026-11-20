@@ -29,6 +29,7 @@ import {
   type Mention,
   type MentionItem,
   type MentionType,
+  type ContextUsage,
   type LLMProvider,
   type ModelSelection,
 } from '@/api/chat';
@@ -61,6 +62,8 @@ type Props = {
   // providers is empty, clicking it opens a panel that points at the
   // settings/integrations page (no more dead "ongrid" placeholder chip).
   providers?: LLMProvider[];
+  contextEnabled?: boolean;
+  contextUsage?: ContextUsage;
   selectedModel?: ModelSelection | null;
   onModelChange?(m: ModelSelection): void;
   // Globe toggle — when on, the chat send payload tells the agent to
@@ -89,7 +92,7 @@ export function ChatInput({
   showSkillsRow = false,
   className,
   providers,
-  selectedModel,
+  selectedModel, contextEnabled, contextUsage,
   onModelChange,
   webSearchEnabled,
   onWebSearchToggle,
@@ -472,6 +475,7 @@ export function ChatInput({
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
             <ModelDropdown
               providers={providers ?? []}
+              contextEnabled={contextEnabled} usage={contextUsage}
               selected={selectedModel ?? null}
               onPick={onModelChange}
               disabled={disabled}

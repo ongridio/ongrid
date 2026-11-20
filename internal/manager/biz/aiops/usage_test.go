@@ -35,7 +35,7 @@ func (f *fakeRepo) ListByParent(context.Context, string) ([]*model.Session, erro
 }
 func (f *fakeRepo) CloseSession(context.Context, string) error          { return nil }
 func (f *fakeRepo) RenameSession(context.Context, string, string) error { return nil }
-func (f *fakeRepo) UpdateSessionModel(context.Context, string, string, string, string) error {
+func (f *fakeRepo) UpdateSessionModel(context.Context, string, string, string, string, ...int) error {
 	return nil
 }
 func (f *fakeRepo) DeleteSession(context.Context, string) error         { return nil }

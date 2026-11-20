@@ -3,6 +3,7 @@ package chatruntime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -125,7 +126,7 @@ func (m *memSessions) CloseSession(_ context.Context, id string) error {
 	return nil
 }
 func (m *memSessions) RenameSession(_ context.Context, _, _ string) error { return nil }
-func (m *memSessions) UpdateSessionModel(_ context.Context, _, _, _ string, reasoningEffort string) error {
+func (m *memSessions) UpdateSessionModel(_ context.Context, _, _, _ string, reasoningEffort string, window ...int) error {
 	return nil
 }
 func (m *memSessions) DeleteSession(_ context.Context, _ string) error { return nil }
@@ -138,7 +139,7 @@ func (m *memSessions) AppendMessage(_ context.Context, msg *model.Message) error
 	m.messages = append(m.messages, msg)
 	return nil
 }
-func (m *memSessions) ListMessages(_ context.Context, sessionID string, _ int) ([]*model.Message, error) {
+func (m *memSessions) ListMessages(_ context.Context, sessionID string, limit int) ([]*model.Message, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := make([]*model.Message, 0, len(m.messages))
@@ -146,6 +147,9 @@ func (m *memSessions) ListMessages(_ context.Context, sessionID string, _ int) (
 		if mg.SessionID == sessionID {
 			out = append(out, mg)
 		}
+	}
+	if limit > 0 && len(out) > limit {
+		out = out[len(out)-limit:]
 	}
 	return out, nil
 }
@@ -1096,5 +1100,47 @@ func TestBuildEinoHistory_SanitizesExpiredToolBudgetResult(t *testing.T) {
 	}
 	if !contains(toolMsg.Content, "may be called again in the current user turn") {
 		t.Fatalf("replay content should tell the model the budget expired: %q", toolMsg.Content)
+	}
+}
+
+func TestRuntimeReplaysBeyondFiftyMessages(t *testing.T) {
+	ctx := context.Background()
+	session := &model.Session{ID: "long", UserID: 1}
+	repo := newMemSessions(session)
+	for i := 0; i < 60; i++ {
+		text := fmt.Sprintf("historic question %d", i)
+		if err := repo.AppendMessage(ctx, &model.Message{SessionID: session.ID, Role: model.RoleUser, Content: &text}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	chat := newScriptedChatModel(schema.AssistantMessage("done", nil))
+	rt, err := NewRuntime(Config{Sessions: repo, ChatModel: chat})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = rt.Handle(ctx, &Request{SessionID: "long", UserID: 1, UserText: "continue"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(chat.inputs) != 1 {
+		t.Fatalf("calls = %d", len(chat.inputs))
+	}
+	for _, msg := range chat.inputs[0] {
+		if msg.Content == "historic question 0" {
+			return
+		}
+	}
+	t.Fatal("oldest user message was lost below the token budget")
+}
+
+func TestContextReusedCallIDsKeepTheirOwnEvidence(t *testing.T) {
+	var rows []*model.Message
+	for _, scope := range []string{"first host", "second host"} {
+		rows = append(rows, &model.Message{ID: scope + "-user", Role: model.RoleUser, Content: strPtr(scope)},
+			&model.Message{ID: scope + "-assistant", Role: model.RoleAssistant, ToolCalls: []model.ToolCall{{ToolName: "read", LLMCallID: strPtr("call_0"), ArgumentsJSON: "{}"}}},
+			&model.Message{ID: scope + "-result", Role: model.RoleTool, ToolCallID: strPtr("call_0"), Content: strPtr(scope + " evidence")})
+	}
+	msgs := buildEinoHistory(rows)
+	if len(msgs) != 6 || msgs[2].Content != "first host evidence" || msgs[5].Content != "second host evidence" {
+		t.Fatalf("mixed tool evidence: %+v", msgs)
 	}
 }

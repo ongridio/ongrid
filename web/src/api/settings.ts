@@ -174,6 +174,7 @@ export function fetchLLMModels(
 export type ReasoningOverride = { levels: string[]; mode?: string };
 
 export type LLMConfigurationProbeInput = {
+  context_windows?: Record<string, number>;
   reasoning_overrides?: Record<string, ReasoningOverride>;
   tls_insecure?: boolean;
   provider: string;

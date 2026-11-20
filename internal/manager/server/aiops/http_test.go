@@ -73,6 +73,16 @@ func TestValidateImageAttachments(t *testing.T) {
 	}
 }
 
+func (f *fakeService) GetSession(_ context.Context, caller svc.Caller, id string) (*model.Session, error) {
+	f.lastCaller = caller
+	for _, s := range f.listResp {
+		if s.ID == id {
+			return s, nil
+		}
+	}
+	return nil, errs.ErrNotFound
+}
+
 type fakeOperationReader struct {
 	op        *model.Operation
 	artifacts []*model.OperationArtifact
@@ -125,7 +135,7 @@ func (f *fakeService) RenameSession(_ context.Context, c svc.Caller, _, _ string
 	return f.closeErr
 }
 
-func (f *fakeService) UpdateSessionModel(_ context.Context, _ svc.Caller, _, provider, selectedModel string, reasoningEffort string) error {
+func (f *fakeService) UpdateSessionModel(_ context.Context, _ svc.Caller, _, provider, selectedModel string, reasoningEffort string, window ...int) error {
 	f.lastUpdateProvider = provider
 	f.lastUpdateModel = selectedModel
 	f.lastUpdateEffort = reasoningEffort

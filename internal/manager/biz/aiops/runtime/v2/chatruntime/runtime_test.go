@@ -125,7 +125,7 @@ func (m *memSessions) CloseSession(_ context.Context, id string) error {
 	return nil
 }
 func (m *memSessions) RenameSession(_ context.Context, _, _ string) error { return nil }
-func (m *memSessions) UpdateSessionModel(_ context.Context, _, _, _ string, reasoningEffort string) error {
+func (m *memSessions) UpdateSessionModel(_ context.Context, _, _, _ string, reasoningEffort string, window ...int) error {
 	return nil
 }
 func (m *memSessions) DeleteSession(_ context.Context, _ string) error { return nil }

@@ -30,6 +30,7 @@ import { useI18n } from '@/i18n/locale';
 type LLMProviderID = 'openai' | 'anthropic' | 'zhipu' | 'gemini' | 'deepseek' | 'kimi' | 'minimax' | 'xiaomi' | 'custom';
 
 type LLMProviderForm = {
+  context_windows: Record<string,number>;
   reasoning_overrides: Record<string, ReasoningOverride>;
   tls_insecure: boolean;
   api_key: string;
@@ -216,6 +217,7 @@ function orderedProviders(locale: string): LLMProviderMeta[] {
 }
 
 const emptyLLMForm: LLMProviderForm = {
+  context_windows: {},
   reasoning_overrides: {},
   tls_insecure: false,
   api_key: '',
@@ -339,6 +341,7 @@ function LLMProviderCard({ meta, initialSettings }: { meta: LLMProviderMeta; ini
       const items = initial ?? (await listSettings('llm')).items as SystemSetting[];
       const next: LLMProviderForm = { ...emptyLLMForm, models: [], reasoning_overrides: {} };
       for (const it of items) {
+        if (it.key === `${meta.id}_context_windows` && it.value) next.context_windows = JSON.parse(it.value);
         if (it.key === `${meta.id}_reasoning_overrides` && it.value) next.reasoning_overrides = JSON.parse(it.value);
         if (meta.custom && it.key === 'custom_tls_insecure') next.tls_insecure = it.value === 'true';
         if (it.key === meta.keyBaseURL) next.base_url = it.value ?? '';
@@ -386,6 +389,7 @@ function LLMProviderCard({ meta, initialSettings }: { meta: LLMProviderMeta; ini
     draft.base_url !== server.base_url ||
     draft.default_model !== server.default_model ||
     JSON.stringify(draft.models) !== JSON.stringify(server.models) ||
+    JSON.stringify(draft.context_windows) !== JSON.stringify(server.context_windows) ||
     JSON.stringify(draft.reasoning_overrides) !== JSON.stringify(server.reasoning_overrides);
 
   const update = <K extends keyof LLMProviderForm>(k: K, v: LLMProviderForm[K]) => {
@@ -435,7 +439,7 @@ function LLMProviderCard({ meta, initialSettings }: { meta: LLMProviderMeta; ini
   };
 
   const signatureFor = (form: LLMProviderForm) => JSON.stringify([
-    form.reasoning_overrides,
+    form.context_windows, form.reasoning_overrides,
     form.tls_insecure,
     meta.id,
     form.api_key,
@@ -458,6 +462,7 @@ function LLMProviderCard({ meta, initialSettings }: { meta: LLMProviderMeta; ini
         base_url: draft.base_url.trim(),
         default_model: draft.default_model.trim(),
         models: draft.models,
+        ...(Object.keys(draft.context_windows).length || Object.keys(server.context_windows).length ? { context_windows: draft.context_windows } : {}),
         reasoning_overrides: draft.reasoning_overrides,
         ...(meta.custom ? { tls_insecure: draft.tls_insecure } : {}),
       });
@@ -501,6 +506,7 @@ function LLMProviderCard({ meta, initialSettings }: { meta: LLMProviderMeta; ini
         base_url: draft.base_url.trim(),
         default_model: draft.default_model.trim(),
         models: draft.models,
+        ...(Object.keys(draft.context_windows).length || Object.keys(server.context_windows).length ? { context_windows: draft.context_windows } : {}),
         reasoning_overrides: draft.reasoning_overrides,
         ...(meta.custom ? { tls_insecure: draft.tls_insecure } : {}),
       });
@@ -543,6 +549,7 @@ function LLMProviderCard({ meta, initialSettings }: { meta: LLMProviderMeta; ini
         base_url: snapshot.base_url.trim(),
         default_model: snapshot.default_model.trim(),
         models: snapshot.models,
+        ...(Object.keys(snapshot.context_windows).length || Object.keys(server.context_windows).length ? { context_windows: snapshot.context_windows } : {}),
         reasoning_overrides: snapshot.reasoning_overrides,
         ...(meta.custom ? { tls_insecure: snapshot.tls_insecure } : {}),
       });
@@ -638,6 +645,14 @@ function LLMProviderCard({ meta, initialSettings }: { meta: LLMProviderMeta; ini
             </details>
           )}
 
+          {draft.models.length > 0 && <details className="text-xs">
+            <summary className="cursor-pointer">{tr('部署上下文上限', 'Deployment context limits')}</summary>
+            <p className="my-2 text-text-muted">{tr('按模型填写此部署实际支持的 token 数，留空时自动识别。', 'Enter the token capacity of each deployment. Leave blank for automatic detection.')}</p>
+            {draft.models.map(id => <label key={id} className="mb-2 flex items-center justify-between gap-2">
+              <span>{tr(`${id} 上限`, `${id} limit`)}</span><Input className="w-32" type="number" min={1024} max={16777216} step={1} placeholder={tr('自动', 'Auto')} value={draft.context_windows[id] ?? ''}
+                onChange={e => { const limits = {...draft.context_windows}; if(e.target.value) limits[id] = Number(e.target.value); else delete limits[id]; update('context_windows',limits); }}/>
+            </label>)}
+          </details>}
           <ReasoningSettings
             models={draft.models}
             overrides={draft.reasoning_overrides}

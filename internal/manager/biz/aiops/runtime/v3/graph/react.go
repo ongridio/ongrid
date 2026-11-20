@@ -84,6 +84,9 @@ func BuildReActGraph(
 		return nil, errors.New("graph: BuildReActGraph: model is required")
 	}
 	cfg = cfg.applyDefaults()
+	if cfg.Context != nil {
+		model = &windowModel{inner: model, raw: model, window: cfg.Context}
+	}
 	model = wrapBudgetStopModel(model, cfg.MaxIterations)
 
 	// 1. Build the inner eino react agent. We pass our adapted tools
@@ -243,6 +246,7 @@ func assembleMessages(in *Input) ([]*schema.Message, error) {
 			userBody = in.MentionsRendered + "\n\n" + userBody
 		}
 		userMessage := schema.UserMessage(userBody)
+		userMessage.Extra = map[string]any{"current_context_turn": true}
 		userMessage.UserInputMultiContent = in.UserImages
 		out = append(out, userMessage)
 	}

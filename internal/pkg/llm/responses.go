@@ -198,6 +198,9 @@ func (t *responsesTransport) roundTripResponses(original *http.Request, chat ope
 		}
 	}
 	payload := map[string]any{"model": chat.Model, "input": input, "store": false, "include": []string{"reasoning.encrypted_content"}}
+	if limit := max(chat.MaxTokens, chat.MaxCompletionTokens); limit > 0 {
+		payload["max_output_tokens"] = limit
+	}
 	if len(chat.Tools) > 0 {
 		tools := make([]map[string]any, 0, len(chat.Tools))
 		for _, tool := range chat.Tools {

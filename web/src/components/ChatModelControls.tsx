@@ -1,5 +1,7 @@
 import { useState, type ComponentProps } from 'react';
 import { Link } from 'react-router-dom';
+import { ContextUsageIndicator } from './ContextUsageIndicator';
+import type { ContextUsage } from '@/api/chat';
 import { Globe } from 'lucide-react';
 import { chatReasoningEffort, type LLMProvider, type ModelSelection } from '@/api/chat';
 import { ModelIcon } from '@/components/icons/Provider';
@@ -13,8 +15,9 @@ export function ModelDropdown({
   disabled,
   providers,
   selected,
-  onPick,
+  onPick, contextEnabled, usage,
 }: {
+  contextEnabled?: boolean; usage?: ContextUsage;
   disabled?: boolean;
   providers: LLMProvider[];
   selected: ModelSelection | null;
@@ -41,6 +44,7 @@ export function ModelDropdown({
   if (selected && !options.some(option => option.value === value)) {
     options.push({ value, label: selected.model, icon: <ModelIcon model={selected.model} provider={selected.provider} size={15}/>, disabled: true });
   }
+  const capability = selected && providers.find(p => p.id === selected.provider)?.context_windows?.[selected.model];
   const levels = (selected ? providers.find(p => p.id === selected.provider)?.reasoning_efforts?.[selected.model] ?? [] : []).filter(level => level !== 'none');
   const labels: Record<string, string> = {
     enabled: 'On', minimal: 'Minimal', low: 'Low',
@@ -63,6 +67,8 @@ export function ModelDropdown({
     options={[{ value: '', label: 'Default' }, ...levels.map(level => ({ value: level, label: labels[level] ?? level }))]}
     onValueChange={reasoning_effort => onPick?.({ ...selected, reasoning_effort })}
   />}
+  {contextEnabled && selected && capability &&
+    <ContextUsageIndicator selected={selected} capability={capability} usage={usage} onPick={onPick} disabled={disabled}/>}
   </div>;
 }
 

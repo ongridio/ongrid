@@ -22,6 +22,7 @@ import (
 const anthropicAPIVersion = "2026-10-21"
 
 type CatalogModel struct {
+	Window    WindowCapability
 	ID        string
 	Reasoning *ReasoningCapability
 }
@@ -111,7 +112,23 @@ func FetchModelCatalog(ctx context.Context, provider string, cfg Config) ([]Cata
 			if err != nil {
 				return nil, fmt.Errorf("invalid model reasoning metadata: %w", err)
 			}
-			models = append(models, CatalogModel{ID: id, Reasoning: capability})
+			window := WindowCapability{Input: max(0, item.MaxInput), Output: max(0, item.MaxOutput)}
+			for _, n := range []int{item.ContextWindow, item.ContextLength, item.MaxModelLen} {
+				if n > 0 && (window.Total == 0 || n < window.Total) {
+					window.Total = n
+				}
+			}
+			if provider == ProviderAnthropic {
+				window.Total = window.Input
+				window.Output = max(0, item.MaxTokens)
+			}
+			if window.Maximum() > 16<<20 || window.Output > 16<<20 {
+				window = WindowCapability{}
+			}
+			if window.Maximum() > 0 {
+				window.Source = "provider"
+			}
+			models = append(models, CatalogModel{ID: id, Reasoning: capability, Window: window})
 		}
 		if !payload.HasMore {
 			return models, nil
@@ -128,8 +145,14 @@ type capabilitySupport struct {
 	Supported bool `json:"supported"`
 }
 type catalogModelJSON struct {
-	ID     string `json:"id"`
-	Effort *struct {
+	ContextWindow int    `json:"context_window"`
+	ContextLength int    `json:"context_length"`
+	MaxModelLen   int    `json:"max_model_len"`
+	MaxInput      int    `json:"max_input_tokens"`
+	MaxOutput     int    `json:"max_output_tokens"`
+	MaxTokens     int    `json:"max_tokens"`
+	ID            string `json:"id"`
+	Effort        *struct {
 		Levels       []string `json:"supported_levels"`
 		DefaultLevel string   `json:"default_level"`
 	} `json:"effort"`
@@ -214,7 +237,7 @@ func (m catalogModelJSON) reasoning(provider string) (*ReasoningCapability, erro
 
 type reasoningDiscoveryEntry struct {
 	fingerprint  [32]byte
-	capabilities map[string]ReasoningCapability
+	capabilities map[string]CatalogModel
 	nextFetch    time.Time
 	fetching     chan struct{}
 }
@@ -226,7 +249,7 @@ type ReasoningDiscovery struct {
 	entries map[string]*reasoningDiscoveryEntry
 }
 
-func (d *ReasoningDiscovery) capabilities(ctx context.Context, p ProviderConfig) map[string]ReasoningCapability {
+func (d *ReasoningDiscovery) capabilities(ctx context.Context, p ProviderConfig) map[string]CatalogModel {
 	fingerprint := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%t", p.BaseURL, p.APIKey, p.TLSInsecure)))
 	d.mu.Lock()
 	if d.entries == nil {
@@ -261,11 +284,9 @@ func (d *ReasoningDiscovery) capabilities(ctx context.Context, p ProviderConfig)
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if err == nil {
-		entry.capabilities = make(map[string]ReasoningCapability)
+		entry.capabilities = make(map[string]CatalogModel)
 		for _, model := range models {
-			if model.Reasoning != nil {
-				entry.capabilities[model.ID] = *model.Reasoning
-			}
+			entry.capabilities[model.ID] = model
 		}
 		entry.nextFetch = time.Now().Add(time.Hour + time.Duration(rand.IntN(300))*time.Second)
 	} else {

@@ -147,9 +147,14 @@ func (r *SessionRepo) RenameSession(ctx context.Context, id string, title string
 // UpdateSessionModel stores the conversation's model route as one atomic
 // update so readers never observe a provider from one selection and a model
 // from another.
-func (r *SessionRepo) UpdateSessionModel(ctx context.Context, id string, provider string, selectedModel string, reasoningEffort string) error {
+func (r *SessionRepo) UpdateSessionModel(ctx context.Context, id string, provider string, selectedModel string, reasoningEffort string, window ...int) error {
 	now := time.Now().UTC()
 	updates := map[string]any{"updated_at": now, "reasoning_effort": reasoningEffort}
+	if len(window) > 0 {
+		updates["context_window"] = window[0]
+	} else {
+		updates["context_window"] = gorm.Expr("CASE WHEN COALESCE(provider, '') = ? AND COALESCE(model, '') = ? THEN context_window ELSE 0 END", provider, selectedModel)
+	}
 	if provider == "" && selectedModel == "" {
 		updates["provider"] = nil
 		updates["model"] = nil
@@ -229,6 +234,9 @@ func (r *SessionRepo) AppendMessage(ctx context.Context, m *model.Message) error
 	}
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(m).Error; err != nil {
+			return err
+		}
+		if err := invalidateEarlierContext(tx, tx.Model(&model.Message{}).Select("id").Where("id = ?", m.ID)); err != nil {
 			return err
 		}
 		if len(m.AttachmentIDs) == 0 {
@@ -333,7 +341,12 @@ func (r *SessionRepo) CreateToolCall(ctx context.Context, tc *model.ToolCall) er
 	if tc == nil {
 		return errs.ErrInvalid
 	}
-	return r.db.WithContext(ctx).Create(tc).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(tc).Error; err != nil {
+			return err
+		}
+		return invalidateEarlierContext(tx, tx.Model(&model.ToolCall{}).Select("message_id").Where("id = ?", tc.ID))
+	})
 }
 
 // SumTokensSince aggregates prompt_tokens / completion_tokens / request
@@ -372,14 +385,16 @@ func (r *SessionRepo) UpdateToolCallResult(
 		"result_json": resultJSON,
 		"error":       errStr,
 	}
-	res := r.db.WithContext(ctx).Model(&model.ToolCall{}).Where("id = ?", id).Updates(updates)
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		return errs.ErrNotFound
-	}
-	return nil
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&model.ToolCall{}).Where("id = ?", id).Updates(updates)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return errs.ErrNotFound
+		}
+		return invalidateEarlierContext(tx, tx.Model(&model.ToolCall{}).Select("message_id").Where("id = ?", id))
+	})
 }
 
 // FinalizePendingToolCalls marks still-open tool-call rows in a finished
@@ -454,5 +469,10 @@ func (r *SessionRepo) hydrateToolResults(ctx context.Context, msgs []*model.Mess
 }
 
 func (r *SessionRepo) SetToolCallResultID(ctx context.Context, id, resultID string) error {
-	return r.db.WithContext(ctx).Model(&model.ToolCall{}).Where("id = ?", id).Update("result_id", resultID).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&model.ToolCall{}).Where("id = ?", id).Update("result_id", resultID).Error; err != nil {
+			return err
+		}
+		return invalidateEarlierContext(tx, tx.Model(&model.ToolCall{}).Select("message_id").Where("id = ?", id))
+	})
 }

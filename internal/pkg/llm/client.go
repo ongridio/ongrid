@@ -117,6 +117,7 @@ type Usage struct {
 // "zhipu", "gemini"). Empty → router uses the default provider. The
 // non-multi-provider single-client path ignores Provider.
 type ChatReq struct {
+	MaxOutput       int
 	ReasoningEffort string
 	Model           string
 	Provider        string
@@ -611,14 +612,20 @@ func (c *openaiClient) toOpenAIReq(req ChatReq, model string) (openai.ChatComple
 		tools = nil
 		toolChoice = "none"
 	}
-	return openai.ChatCompletionRequest{
+	sdkReq := openai.ChatCompletionRequest{
 		Model:           model,
 		Messages:        msgs,
 		Tools:           tools,
 		ToolChoice:      toolChoice,
 		Temperature:     temp,
 		ReasoningEffort: req.ReasoningEffort,
-	}, nil
+	}
+	if c.cfg.Provider == ProviderOpenAI {
+		sdkReq.MaxCompletionTokens = req.MaxOutput
+	} else {
+		sdkReq.MaxTokens = req.MaxOutput
+	}
+	return sdkReq, nil
 }
 
 func toOpenAIMessage(m Message) (openai.ChatCompletionMessage, error) {

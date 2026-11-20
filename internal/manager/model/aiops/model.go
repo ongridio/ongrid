@@ -68,7 +68,12 @@ type APMSourceScope struct {
 }
 
 type Session struct {
-	ReasoningEffort string `gorm:"size:32;column:reasoning_effort;not null;default:''"`
+	ContextWindow     int                `gorm:"not null;default:0"`
+	ContextCheckpoint *ContextCheckpoint `gorm:"serializer:json;type:longtext" json:"-"`
+	ContextTurn       string             `gorm:"size:36" json:"-"`
+	ContextRevision   int64              `gorm:"not null;default:0" json:"-"`
+	ContextUsage      *ContextUsage      `gorm:"serializer:json;type:text"`
+	ReasoningEffort   string             `gorm:"size:32;column:reasoning_effort;not null;default:''"`
 	// RuntimeVersion pins execution policy. Empty means historical provenance
 	// has not been classified; migrations must not guess v2 versus v3.
 	RuntimeVersion string `gorm:"size:16;column:runtime_version"`

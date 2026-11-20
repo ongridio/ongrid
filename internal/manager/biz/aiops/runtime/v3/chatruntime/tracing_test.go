@@ -127,9 +127,12 @@ func testAgentTracingRealGraphModelAndTool(t *testing.T, capture, large bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session := &aiopsmodel.Session{ID: "conversation-1", UserID: 7}
+	session := &aiopsmodel.Session{ID: "conversation-1", UserID: 7, ContextWindow: 1_000_000}
 	runtime, err := NewRuntime(Config{
 		Sessions: newMemSessions(session), ChatModel: chatModel.(einomodel.ToolCallingChatModel),
+		ResolveWindow: func(context.Context, string, string) (string, string, llm.WindowCapability) {
+			return "custom", "requested-model", llm.WindowCapability{Total: 1_000_000}
+		},
 		BasePrompt:   basePrompt,
 		ToolBag:      []basetool.BaseTool{&fakeTool{name: "query_traceql", schema: `{"type":"object","properties":{}}`}},
 		GraphCfg:     graph.Config{MaxIterations: 5},

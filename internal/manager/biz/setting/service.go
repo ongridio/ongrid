@@ -15,6 +15,7 @@ package setting
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -163,6 +164,15 @@ func (s *Service) SetBatch(ctx context.Context, settings []model.Setting) error 
 func validateSetting(category, key, value string) error {
 	switch category {
 	case model.CategoryLLM:
+		if strings.HasSuffix(key, "_context_windows") {
+			var limits map[string]int
+			if !isKnownLLMProvider(strings.TrimSuffix(key, "_context_windows")) || len(value) > 65536 || json.Unmarshal([]byte(value), &limits) != nil || limits == nil {
+				return fmt.Errorf("%w: invalid context windows", errs.ErrInvalid)
+			}
+			if err := validateWindowLimits(limits); err != nil {
+				return fmt.Errorf("%w: %v", errs.ErrInvalid, err)
+			}
+		}
 		if strings.HasSuffix(key, "_reasoning_default") {
 			provider := strings.TrimSuffix(key, "_reasoning_default")
 			if _, err := decodeLLMDefault(provider, value); err != nil {

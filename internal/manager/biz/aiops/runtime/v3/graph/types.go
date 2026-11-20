@@ -54,8 +54,7 @@ type Input struct {
 
 	// History is the prior conversation in eino message form. Includes
 	// user / assistant / tool messages; ordered chronologically.
-	// HistoryLimit gating happens upstream — this layer takes the slice
-	// as-is.
+	// The model adapter applies the selected token budget on every step.
 	History []*schema.Message
 
 	// UserText is the new user turn (verbatim, post-mention-inlining).
@@ -136,6 +135,7 @@ type Output struct {
 // 改进点 #5: MaxIterations 内嵌 — eino's ReAct accepts
 // MaxStep at construction; we expose it here.
 type Config struct {
+	Context *ContextWindow
 	// ToolPersistence is a per-run sink invoked directly by each tool adapter.
 	// It is deliberately injected at graph construction because nested Eino
 	// ToolsNode callbacks are not reliable for durable tool-result writes.

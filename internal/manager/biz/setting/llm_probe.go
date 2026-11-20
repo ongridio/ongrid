@@ -59,6 +59,7 @@ const (
 // persisted only by LLMConfigurationService.Save; it must never be logged or
 // copied into LLMProbeResult.
 type LLMProbeInput struct {
+	WindowLimits       map[string]int                   `json:"context_windows,omitempty"`
 	ReasoningOverrides map[string]llm.ReasoningOverride `json:"reasoning_overrides,omitempty"`
 	TLSInsecure        bool                             `json:"tls_insecure"`
 	Provider           string                           `json:"provider"`
@@ -105,6 +106,7 @@ func NewLLMConfigProbe(defaults map[string]EnvProviderDefaults) *LLMConfigProbe 
 }
 
 type validatedLLMConfig struct {
+	windowLimits       map[string]int
 	reasoningOverrides map[string]llm.ReasoningOverride
 	tlsInsecure        bool
 	provider           string
@@ -180,6 +182,13 @@ func (s *LLMConfigurationService) Save(ctx context.Context, in LLMProbeInput) (L
 		{Category: settingmodel.CategoryLLM, Key: keys.defaultModel, Value: cfg.defaultModel},
 		{Category: settingmodel.CategoryLLM, Key: keys.models, Value: modelsJSON},
 	}
+	if cfg.windowLimits != nil {
+		raw, err := json.Marshal(cfg.windowLimits)
+		if err != nil {
+			return result, err
+		}
+		rows = append(rows, settingmodel.Setting{Category: settingmodel.CategoryLLM, Key: cfg.provider + "_context_windows", Value: string(raw)})
+	}
 	if cfg.reasoningOverrides != nil {
 		raw, err := json.Marshal(cfg.reasoningOverrides)
 		if err != nil {
@@ -229,12 +238,12 @@ func (p *LLMConfigProbe) validateInput(in LLMProbeInput, operational bool) (vali
 	defaultModel := strings.TrimSpace(in.DefaultModel)
 	result := LLMProbeResult{Code: LLMProbeCodeOK, Provider: provider, Model: defaultModel}
 	cfg := validatedLLMConfig{
-		reasoningOverrides: in.ReasoningOverrides,
-		tlsInsecure:        in.TLSInsecure,
-		provider:           provider,
-		apiKey:             in.APIKey,
-		storedBaseURL:      strings.TrimSpace(in.BaseURL),
-		defaultModel:       defaultModel,
+		reasoningOverrides: in.ReasoningOverrides, windowLimits: in.WindowLimits,
+		tlsInsecure:   in.TLSInsecure,
+		provider:      provider,
+		apiKey:        in.APIKey,
+		storedBaseURL: strings.TrimSpace(in.BaseURL),
+		defaultModel:  defaultModel,
 	}
 
 	if in.TLSInsecure && provider != settingmodel.LLMProviderCustom {
@@ -244,6 +253,10 @@ func (p *LLMConfigProbe) validateInput(in LLMProbeInput, operational bool) (vali
 	}
 	if !isKnownLLMProvider(provider) {
 		result.Code = LLMProbeCodeUnsupportedProvider
+		return cfg, result, false
+	}
+	if err := validateWindowLimits(in.WindowLimits); err != nil {
+		result.Code, result.Detail = LLMProbeCodeInvalidRequest, err.Error()
 		return cfg, result, false
 	}
 	if err := llm.ValidateReasoningOverrides(provider, in.ReasoningOverrides); err != nil {
