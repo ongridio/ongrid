@@ -10,7 +10,7 @@ beforeEach(() => setLocale('en-US'));
 afterEach(() => { cleanup(); setLocale('zh-CN'); });
 
 const selected = { provider: 'custom', model: 'example' };
-const capability = { auto: 256000, total: 1000000, source: 'provider', options: [128000, 256000, 1000000] };
+const capability = { auto: 256000, total: 1050000, source: 'provider', options: [32000, 64000, 128000, 256000, 512000, 1050000] };
 const usage: ContextUsage = { ...selected, known: true, estimated: 36775, window: 256000, input_budget: 243808,
   output_reserve: 8192, tools: 30648, instructions: 5495, tool_results: 0, reported: 20813, status: 'ready' };
 
@@ -36,8 +36,9 @@ it('charts the same input budget for the ring, total and categories, and keeps e
   expect(details.open).toBe(true);
   expect(panel.getByText('20,813')).toBeVisible();
   await act(async () => { panel.getByRole('combobox', { name: 'Context window' }).focus(); await user.keyboard('{ArrowDown}'); });
-  await act(async () => { await user.click(screen.getByRole('option', { name: '128,000' })); });
-  expect(pick).toHaveBeenCalledWith({ ...selected, context_window_tokens: 128000 });
+  expect(screen.getAllByRole('option').map(option => option.textContent)).toEqual(['Auto · 256K', '32K', '64K', '128K', '256K', '512K', '1M']);
+  await act(async () => { await user.click(screen.getByRole('option', { name: '1M' })); });
+  expect(pick).toHaveBeenCalledWith({ ...selected, context_window_tokens: 1050000 });
   await user.click(panel.getByRole('button', { name: 'Close' }));
   expect(screen.queryByRole('dialog')).toBeNull();
 });
@@ -47,6 +48,7 @@ it('shows counts without percentages when the deployment capacity is unknown', a
   const { panel } = await openUsage();
   expect(panel.getByText(/capacity is unknown/)).toBeVisible();
   expect(panel.getByRole('combobox')).toBeDisabled();
+  expect(panel.getByRole('combobox')).toHaveTextContent('Auto · 32K');
   expect(panel.queryByRole('meter')).toBeNull();
   expect(panel.getByText('30,648')).toBeVisible();
 });

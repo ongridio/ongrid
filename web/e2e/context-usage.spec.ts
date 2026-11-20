@@ -23,7 +23,7 @@ for (const width of [390, 768, 1280, 1920]) {
         const path = new URL(route.request().url()).pathname;
         if (path.endsWith('/aiops/models')) return route.fulfill({ json: { default: selected, runtime_version: 'v3',
           providers: [{ id: selected.provider, models: [model], reasoning_efforts: { [model]: ['medium', 'high'] }, context_windows: {
-            [model]: { auto: 256000, source: 'provider', options: [128000, 256000] },
+            [model]: { auto: 256000, source: 'provider', options: [128000, 256000, 1050000] },
           } }] } });
         if (path.endsWith('/chat/sessions')) return route.fulfill({ json: { items: [session], total: 1 } });
         if (path.endsWith('/context')) return route.fulfill({ json: session });
@@ -78,7 +78,12 @@ for (const width of [390, 768, 1280, 1920]) {
       expect(box.x).toBeGreaterThanOrEqual(0);
       expect(box.x + box.width).toBeLessThanOrEqual(width);
       expect(box.y + box.height).toBeLessThanOrEqual((await trigger.boundingBox())!.y);
-      await expect(panel.getByRole('combobox')).toBeVisible();
+      const windowPicker = panel.getByRole('combobox');
+      await expect(windowPicker).toHaveText(zh ? '自动 · 256K' : 'Auto · 256K');
+      await windowPicker.click();
+      await expect(page.getByRole('option', { name: '1M', exact: true })).toBeVisible();
+      await page.screenshot({ path: test.info().outputPath('window-options.png') });
+      await page.keyboard.press('Escape');
       await page.screenshot({ path: test.info().outputPath('composer.png') });
       await panel.getByText(zh ? '计数详情' : 'Token details').click();
       await expect(panel.getByText('20,813')).toBeVisible();

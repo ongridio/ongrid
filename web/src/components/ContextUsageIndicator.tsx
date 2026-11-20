@@ -5,6 +5,12 @@ import { Popover, PopoverClose, PopoverContent, PopoverTitle, PopoverTrigger } f
 import { Select } from '@/components/ui/Select';
 import { useI18n } from '@/i18n/locale';
 
+function windowLabel(tokens: number) {
+  if (tokens >= 1_000_000) return `${Math.floor(tokens / 100_000) / 10}M`;
+  if (tokens >= 1_000) return `${tokens / 1_000}K`;
+  return String(tokens);
+}
+
 export function ContextUsageIndicator({ capability, selected, usage, disabled, onPick }: {
   capability: WindowCapability;
   selected: ModelSelection;
@@ -80,8 +86,8 @@ export function ContextUsageIndicator({ capability, selected, usage, disabled, o
         <span className="text-xs text-text-muted">{tr('上下文窗口', 'Context window')}</span>
         <Select label={tr('上下文窗口', 'Context window')} variant="inline" className="max-w-full"
           disabled={disabled || !onPick || !capability.options?.length} value={String(selected.context_window_tokens || 0)}
-          options={[{ value: '0', label: tr(`自动 · ${format(capability.auto)}`, `Auto · ${format(capability.auto)}`) },
-            ...(capability.options ?? []).map(n => ({ value: String(n), label: format(n) }))]}
+          options={[{ value: '0', label: `${tr('自动', 'Auto')} · ${windowLabel(capability.auto)}` },
+            ...(capability.options ?? []).map(n => ({ value: String(n), label: windowLabel(n) }))]}
           onValueChange={v => onPick?.({ ...selected, context_window_tokens: Number(v) })} />
       </div>
       {current && <details className="group mt-1 text-xs text-text-muted">
