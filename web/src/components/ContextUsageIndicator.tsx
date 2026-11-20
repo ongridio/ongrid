@@ -81,7 +81,7 @@ export function ContextUsageIndicator({ capability, selected, usage, disabled, o
         </dl>
       </> : <p className="my-3 text-text-muted">{tr('发送消息后显示用量。', 'Send a message to see usage.')}</p>}
 
-      {!capability.source && <p className="my-2 text-xs text-text-muted">{tr('部署未提供容量，采用保守预算。', 'This deployment uses a fallback budget because its capacity is unknown.')}</p>}
+      {!capability.source && <p className="my-2 text-xs text-text-muted">{tr(`未获取到模型上限，默认使用 ${windowLabel(capability.auto)} 窗口。`, `Model capacity is unknown. Using the default ${windowLabel(capability.auto)} window.`)}</p>}
       <div className="flex items-center justify-between gap-2 border-t border-border-soft pt-2">
         <span className="text-xs text-text-muted">{tr('上下文窗口', 'Context window')}</span>
         <Select label={tr('上下文窗口', 'Context window')} variant="inline" className="max-w-full"

@@ -3,8 +3,10 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -12,6 +14,51 @@ import (
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestGeminiNativeCatalogWindows(t *testing.T) {
+	cfg := Config{BaseURL: "https://generativelanguage.googleapis.com/v1beta/openai", APIKey: "test-key"}
+	var pages []string
+	models, err := fetchModelCatalog(context.Background(), ProviderGemini, cfg, reasoningRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		require.Equal(t, "generativelanguage.googleapis.com", r.URL.Host)
+		require.Equal(t, "/v1beta/models", r.URL.Path)
+		require.Equal(t, "test-key", r.Header.Get("x-goog-api-key"))
+		require.Empty(t, r.Header.Get("Authorization"))
+		page := r.URL.Query().Get("pageToken")
+		pages = append(pages, page)
+		body := `{"models":[{"name":"models/gemini-future","inputTokenLimit":65536,"outputTokenLimit":4096}],"nextPageToken":"next"}`
+		if page == "next" {
+			body = `{"models":[{"name":"models/gemini-4-argon","inputTokenLimit":1048576,"outputTokenLimit":65536}]}`
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
+	}))
+	require.NoError(t, err)
+	require.Equal(t, []string{"", "next"}, pages)
+	require.Len(t, models, 2)
+	require.Equal(t, "gemini-future", models[0].ID)
+	require.Equal(t, WindowCapability{Input: 65536, Output: 4096, Source: "provider"}, models[0].Window)
+	require.Equal(t, 1048576, models[1].Window.Total)
+	p := ProviderConfig{ID: ProviderGemini, Model: "models/gemini-future", BaseURL: cfg.BaseURL}
+	require.Equal(t, models[0].Window, providerWindows(p, map[string]CatalogModel{models[0].ID: models[0]})[p.Model])
+}
+
+func TestCompatibleCatalogWindowLimits(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/v1beta/openai/models", r.URL.Path)
+		require.Empty(t, r.Header.Get("x-goog-api-key"))
+		_, _ = io.WriteString(w, `{"data":[
+			{"id":"routed","context_length":1000000,"top_provider":{"context_length":64000,"max_completion_tokens":2048}},
+			{"id":"self-hosted","max_model_len":32000,"max_input_tokens":99999999},
+			{"id":"output-only","max_completion_tokens":4096},{"id":"unknown"}]}`)
+	}))
+	defer srv.Close()
+	models, err := FetchModelCatalog(context.Background(), ProviderGemini, Config{BaseURL: srv.URL + "/v1beta/openai"})
+	require.NoError(t, err)
+	require.Len(t, models, 4)
+	require.Equal(t, WindowCapability{Total: 64000, Output: 2048, Source: "provider"}, models[0].Window)
+	require.Equal(t, WindowCapability{Total: 32000, Source: "provider"}, models[1].Window)
+	require.Equal(t, WindowCapability{Output: 4096}, models[2].Window)
+	require.Equal(t, WindowCapability{}, models[3].Window)
+}
 
 func TestCatalogMetadataAndFallbacks(t *testing.T) {
 	for _, tc := range []struct {

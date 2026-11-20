@@ -9,8 +9,8 @@ vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect()
 beforeEach(() => setLocale('en-US'));
 afterEach(() => { cleanup(); setLocale('zh-CN'); });
 
-const selected = { provider: 'custom', model: 'example' };
-const capability = { auto: 256000, total: 1050000, source: 'provider', options: [32000, 64000, 128000, 256000, 512000, 1050000] };
+const selected = { provider: 'custom', model: 'example', context_window_tokens: 256000 };
+const capability = { auto: 1050000, total: 1050000, source: 'provider', options: [32000, 64000, 128000, 256000, 512000, 1050000] };
 const usage: ContextUsage = { ...selected, known: true, estimated: 36775, window: 256000, input_budget: 243808,
   output_reserve: 8192, tools: 30648, instructions: 5495, tool_results: 0, reported: 20813, status: 'ready' };
 
@@ -36,7 +36,7 @@ it('charts the same input budget for the ring, total and categories, and keeps e
   expect(details.open).toBe(true);
   expect(panel.getByText('20,813')).toBeVisible();
   await act(async () => { panel.getByRole('combobox', { name: 'Context window' }).focus(); await user.keyboard('{ArrowDown}'); });
-  expect(screen.getAllByRole('option').map(option => option.textContent)).toEqual(['Auto · 256K', '32K', '64K', '128K', '256K', '512K', '1M']);
+  expect(screen.getAllByRole('option').map(option => option.textContent)).toEqual(['Auto · 1M', '32K', '64K', '128K', '256K', '512K', '1M']);
   await act(async () => { await user.click(screen.getByRole('option', { name: '1M' })); });
   expect(pick).toHaveBeenCalledWith({ ...selected, context_window_tokens: 1050000 });
   await user.click(panel.getByRole('button', { name: 'Close' }));
@@ -44,11 +44,11 @@ it('charts the same input budget for the ring, total and categories, and keeps e
 });
 
 it('shows counts without percentages when the deployment capacity is unknown', async () => {
-  render(<ContextUsageIndicator capability={{ auto: 32000 }} selected={selected} usage={{ ...usage, window: 32000, known: false }} />);
+  render(<ContextUsageIndicator capability={{ auto: 256000 }} selected={{ ...selected, context_window_tokens: 0 }} usage={{ ...usage, known: false }} />);
   const { panel } = await openUsage();
-  expect(panel.getByText(/capacity is unknown/)).toBeVisible();
+  expect(panel.getByText('Model capacity is unknown. Using the default 256K window.')).toBeVisible();
   expect(panel.getByRole('combobox')).toBeDisabled();
-  expect(panel.getByRole('combobox')).toHaveTextContent('Auto · 32K');
+  expect(panel.getByRole('combobox')).toHaveTextContent('Auto · 256K');
   expect(panel.queryByRole('meter')).toBeNull();
   expect(panel.getByText('30,648')).toBeVisible();
 });

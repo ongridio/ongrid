@@ -17,7 +17,7 @@ func TestModelWindowWhenCatalogOmitsCapacity(t *testing.T) {
 			p := ProviderConfig{ID: tc.provider, Model: tc.model, BaseURL: "https://" + tc.host}
 			c := providerWindows(p, nil)[p.Model]
 			window, _, _ := c.Budget(0)
-			if c.Source != "model_spec" || c.Output != 131072 || window != 256000 || !c.Supports(1048576) {
+			if c.Source != "model_spec" || c.Output != 131072 || window != 1048576 || !c.Supports(1048576) {
 				t.Fatalf("missing official capability: %+v", c)
 			}
 			catalog := map[string]CatalogModel{p.Model: {Window: WindowCapability{Output: 4096}}}
@@ -38,9 +38,12 @@ func TestContextWindowCapacity(t *testing.T) {
 		c                               WindowCapability
 		selected, window, input, output int
 	}{
-		{"unknown", WindowCapability{}, 1_000_000, 32000, 26250, 4000},
+		{"unknown", WindowCapability{}, 0, 256000, 243808, 8192},
+		{"unknown with stale selection", WindowCapability{}, 1_000_000, 256000, 243808, 8192},
+		{"only output known", WindowCapability{Output: 2048}, 0, 256000, 249952, 2048},
 		{"small shared", WindowCapability{Total: 128000}, 0, 128000, 115808, 8192},
-		{"large shared", WindowCapability{Total: 1_000_000}, 0, 256000, 243808, 8192},
+		{"large shared", WindowCapability{Total: 1_000_000}, 0, 1_000_000, 987808, 8192},
+		{"manual selection", WindowCapability{Total: 1_000_000}, 256000, 256000, 243808, 8192},
 		{"explicit maximum", WindowCapability{Total: 1_000_000}, 1_000_000, 1_000_000, 987808, 8192},
 		{"separate input", WindowCapability{Input: 100000, Output: 1024}, 0, 100000, 96000, 1024},
 	}
