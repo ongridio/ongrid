@@ -208,24 +208,25 @@ type catalogModelJSON struct {
 	} `json:"capabilities"`
 }
 
-func (m catalogModelJSON) window(provider string) WindowCapability {
-	limit := func(values ...int) int {
-		result := 0
-		for _, v := range values {
-			if v > 0 && v <= 16<<20 && (result == 0 || v < result) {
-				result = v
-			}
+func smallestModelLimit(values ...int) int {
+	result := 0
+	for _, v := range values {
+		if v > 0 && v <= 16<<20 && (result == 0 || v < result) {
+			result = v
 		}
-		return result
 	}
+	return result
+}
+
+func (m catalogModelJSON) window(provider string) WindowCapability {
 	c := WindowCapability{
-		Total:  limit(m.ContextWindow, m.ContextLength, m.MaxModelLen, m.TopProvider.ContextLength),
-		Input:  limit(m.MaxInput),
-		Output: limit(m.MaxOutput, m.MaxCompletion, m.TopProvider.MaxCompletion),
+		Total:  smallestModelLimit(m.ContextWindow, m.ContextLength, m.MaxModelLen, m.TopProvider.ContextLength),
+		Input:  smallestModelLimit(m.MaxInput),
+		Output: smallestModelLimit(m.MaxOutput, m.MaxCompletion, m.TopProvider.MaxCompletion),
 	}
 	if provider == ProviderAnthropic {
-		c.Total = limit(c.Total, c.Input)
-		c.Output = limit(c.Output, m.MaxTokens)
+		c.Total = smallestModelLimit(c.Total, c.Input)
+		c.Output = smallestModelLimit(c.Output, m.MaxTokens)
 	}
 	if c.Maximum() > 0 {
 		c.Source = "provider"

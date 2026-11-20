@@ -72,3 +72,19 @@ func TestContextWindowCapacity(t *testing.T) {
 		t.Fatal(c)
 	}
 }
+
+func TestDeepSeekOfficialAliasUsesCatalogWindow(t *testing.T) {
+	p := ProviderConfig{ID: ProviderDeepSeek, Model: "deepseek-v4-flash", BaseURL: "https://api.deepseek.com/v1"}
+	catalog := map[string]CatalogModel{
+		"deepseek-flash": {Window: WindowCapability{Total: 1048576, Output: 32768, Source: "provider"}},
+		p.Model:          {Window: WindowCapability{Output: 8192}},
+	}
+	got := providerWindows(p, catalog)[p.Model]
+	if got.Total != 1048576 || got.Output != 8192 || got.Source != "provider" {
+		t.Fatal(got)
+	}
+	p.BaseURL = "https://gateway.example/v1"
+	if c := providerWindows(p, catalog)[p.Model]; c.Maximum() != 0 {
+		t.Fatal(c)
+	}
+}

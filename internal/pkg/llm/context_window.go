@@ -69,34 +69,34 @@ func providerWindows(p ProviderConfig, catalog map[string]CatalogModel) map[stri
 	if u != nil {
 		host = strings.ToLower(u.Hostname())
 	}
+	official := map[string][]string{
+		ProviderOpenAI: {"api.openai.com"}, ProviderDeepSeek: {"api.deepseek.com"}, ProviderAnthropic: {"api.anthropic.com"},
+		ProviderGemini: {"generativelanguage.googleapis.com"}, ProviderKimi: {"api.moonshot.cn", "api.moonshot.ai"},
+		ProviderMiniMax: {"api.minimax.io", "api.minimaxi.com", "api.minimax.cn"}, ProviderZhipu: {"open.bigmodel.cn", "api.z.ai"},
+		ProviderXiaomi: {"api.xiaomimimo.com", "token-plan-cn.xiaomimimo.com", "token-plan-sgp.xiaomimimo.com", "token-plan-ams.xiaomimimo.com"},
+	}
+	firstParty := (p.ID == ProviderOpenAI && p.BaseURL == "") || slices.Contains(official[p.ID], host)
 	windows := map[string]WindowCapability{}
 	for _, id := range append(slices.Clone(p.Models), p.Model) {
 		if id == "" {
 			continue
 		}
 		name := id
-		if p.ID == ProviderGemini && host == "generativelanguage.googleapis.com" {
+		if firstParty && p.ID == ProviderGemini {
 			name = strings.TrimPrefix(id, "models/")
 		}
-		entry, ok := catalog[id]
-		if !ok {
-			entry = catalog[name]
+		if firstParty && p.ID == ProviderDeepSeek && (id == "deepseek-v4-flash" || id == "deepseek-v4-flash-vision-exp") {
+			name = "deepseek-flash"
 		}
-		c := entry.Window
-		if c.Maximum() == 0 {
-			official := map[string][]string{
-				ProviderOpenAI: {"api.openai.com"}, ProviderDeepSeek: {"api.deepseek.com"}, ProviderAnthropic: {"api.anthropic.com"},
-				ProviderGemini: {"generativelanguage.googleapis.com"}, ProviderKimi: {"api.moonshot.cn", "api.moonshot.ai"},
-				ProviderMiniMax: {"api.minimax.io", "api.minimaxi.com", "api.minimax.cn"}, ProviderZhipu: {"open.bigmodel.cn", "api.z.ai"},
-				ProviderXiaomi: {"api.xiaomimimo.com", "token-plan-cn.xiaomimimo.com", "token-plan-sgp.xiaomimimo.com", "token-plan-ams.xiaomimimo.com"},
+		c := catalog[id].Window
+		if c.Maximum() == 0 && firstParty {
+			fallback := catalog[name].Window
+			output := smallestModelLimit(c.Output, fallback.Output)
+			if fallback.Maximum() == 0 {
+				fallback = builtinWindow(p.ID, name)
 			}
-			if (p.ID == ProviderOpenAI && host == "" && p.BaseURL == "") || slices.Contains(official[p.ID], host) {
-				spec := builtinWindow(p.ID, name)
-				if c.Output > 0 && (spec.Output == 0 || c.Output < spec.Output) {
-					spec.Output = c.Output
-				}
-				c = spec
-			}
+			fallback.Output = smallestModelLimit(output, fallback.Output)
+			c = fallback
 		}
 		if limit := p.WindowLimits[id]; limit >= 1024 && limit <= 16<<20 && (c.Maximum() == 0 || limit < c.Maximum()) {
 			if c.Total == 0 && c.Input > 0 {
