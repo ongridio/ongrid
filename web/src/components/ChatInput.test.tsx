@@ -62,7 +62,7 @@ describe('ChatInput image attachments', () => {
         <ChatInput value="" onSubmit={vi.fn()} allowAttachments />
       </MemoryRouter>,
     );
-    expect(screen.getByLabelText('Choose images')).toHaveAttribute('accept', '.png,.jpg,.jpeg,.webp');
+    expect(screen.getByLabelText('Choose files')).toHaveAttribute('accept', '.png,.jpg,.jpeg,.webp,.txt,.log,.md,.csv,.json,.yaml,.yml');
   });
 
   it('previews and submits a selected image', async () => {
@@ -73,7 +73,7 @@ describe('ChatInput image attachments', () => {
       </MemoryRouter>,
     );
     const file = new File([new Uint8Array([137, 80, 78, 71])], 'chart.png', { type: 'image/png' });
-    fireEvent.change(screen.getByLabelText('Choose images'), { target: { files: [file] } });
+    fireEvent.change(screen.getByLabelText('Choose files'), { target: { files: [file] } });
 
     const thumbnail = await screen.findByAltText('chart.png');
     fireEvent.click(thumbnail);
@@ -115,7 +115,7 @@ describe('ChatInput image attachments', () => {
         <ChatInput value="" onSubmit={vi.fn()} allowAttachments />
       </MemoryRouter>,
     );
-    const input = screen.getByLabelText('Choose images');
+    const input = screen.getByLabelText('Choose files');
     const files = Array.from({ length: 4 }, (_, index) =>
       new File([new Uint8Array([137, 80, 78, 71])], `image-${index}.png`, { type: 'image/png' }),
     );
@@ -131,18 +131,41 @@ describe('ChatInput image attachments', () => {
   });
 });
 
+it('accepts images and text files together in the same picker', async () => {
+  const onSubmit = vi.fn();
+  render(<MemoryRouter><ChatInput allowAttachments onSubmit={onSubmit} /></MemoryRouter>);
+  const draft = screen.getByRole('textbox');
+  const picker = screen.getByLabelText('Choose files');
+  fireEvent.change(draft, { target: { value: 'Check these' } });
+  const photo = new File(['image'], 'chart.png', { type: 'image/png' });
+  const logs = ['a.log', 'b.TXT'].map(name => {
+    const file = new File(['ready'], name);
+    file.arrayBuffer = async () => new TextEncoder().encode('ready').buffer;
+    return file;
+  });
+  fireEvent.change(picker, { target: { files: [logs[0], photo, logs[1]] } });
+  await screen.findByAltText('chart.png');
+  const text = 'Check these\n\na.log\nready\n\nb.TXT\nready';
+  expect(draft).toHaveValue(text);
+  expect(onSubmit).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+  expect(onSubmit).toHaveBeenCalledWith({ text, mentions: [], attachments: [photo] });
+});
+
 it('keeps the draft intact when a text file is too large or contains invalid UTF-8', async () => {
   render(<MemoryRouter><ChatInput value="check the logs" allowAttachments onSubmit={vi.fn()} /></MemoryRouter>);
-  const picker = screen.getByLabelText('Choose a text file');
+  const picker = screen.getByLabelText('Choose files');
   const oversized = new File([new Uint8Array(128 * 1024 + 1)], 'service.log');
   fireEvent.change(picker, { target: { files: [oversized] } });
   expect(screen.getByRole('alert')).toHaveTextContent('128 KiB');
 
   const binary = new File([], 'invalid.txt');
   binary.arrayBuffer = async () => Uint8Array.of(0xff).buffer;
-  fireEvent.change(picker, { target: { files: [binary] } });
+  const photo = new File(['image'], 'chart.png', { type: 'image/png' });
+  fireEvent.change(picker, { target: { files: [photo, binary] } });
   await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('UTF-8'));
   expect(screen.getByRole('textbox')).toHaveValue('check the logs');
+  expect(screen.queryByAltText('chart.png')).toBeNull();
 });
 
 it('groups composer actions and exposes the current search mode', async () => {

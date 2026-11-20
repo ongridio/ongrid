@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { Bot, Check, ChevronRight, ExternalLink, FileText, Globe, ImagePlus, Paperclip, Plug, Plus, Wrench } from 'lucide-react';
+import { Bot, Check, ChevronRight, ExternalLink, Globe, Paperclip, Plug, Plus, Wrench } from 'lucide-react';
 import { agentLabel, listAgents } from '@/api/agents';
 import { listMcpServers } from '@/api/mcp';
 import { listSkills, localizedSkill } from '@/api/skills';
@@ -62,15 +62,13 @@ function CatalogItems({ kind, empty, onPick }: {
 
 type Props = {
   disabled?: boolean;
-  onAddImage?: () => void;
-  imageLimitReached: boolean;
-  onAddText?: () => void;
+  onAddFiles?: () => void;
   webSearchEnabled: boolean;
   onWebSearchToggle?: (next: boolean) => void;
   onReference: (prompt: string) => void;
 };
 
-export function ChatActionsMenu({ disabled, onAddImage, imageLimitReached, onAddText, webSearchEnabled, onWebSearchToggle, onReference }: Props) {
+export function ChatActionsMenu({ disabled, onAddFiles, webSearchEnabled, onWebSearchToggle, onReference }: Props) {
   const { tr } = useI18n();
   const label = tr('更多操作', 'More actions');
   return (
@@ -81,11 +79,8 @@ export function ChatActionsMenu({ disabled, onAddImage, imageLimitReached, onAdd
         <Plus size={18} className="transition-transform group-aria-expanded:rotate-45 motion-reduce:transition-none" />
       </DropdownMenuTrigger>
       <DropdownMenuContent aria-label={label} side="top" sideOffset={8} className="w-44 rounded-xl">
-        {onAddImage && onAddText && <>
-          <Submenu label={tr('添加文件', 'Add files')} icon={Paperclip}>
-            <DropdownMenuItem onClick={onAddImage} disabled={imageLimitReached}><ImagePlus size={15} />{tr('上传图片', 'Upload images')}</DropdownMenuItem>
-            <DropdownMenuItem onClick={onAddText}><FileText size={15} />{tr('插入文本文件', 'Insert text file')}</DropdownMenuItem>
-          </Submenu>
+        {onAddFiles && <>
+          <DropdownMenuItem onClick={onAddFiles}><Paperclip size={16} />{tr('添加文件', 'Add files')}</DropdownMenuItem>
           <DropdownMenuSeparator />
         </>}
         {onWebSearchToggle && <Submenu label={tr('模式', 'Mode')} icon={Globe}>

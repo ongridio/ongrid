@@ -108,9 +108,8 @@ for (const width of [390, 768, 1280, 1920]) {
       await expect(trigger).toBeFocused();
       if (width === 1280 && theme === 'light') {
         await add.click();
-        await page.getByRole('menuitem', { name: '添加文件' }).click();
         const chooser = page.waitForEvent('filechooser');
-        await page.getByRole('menuitem', { name: '插入文本文件' }).click();
+        await page.getByRole('menuitem', { name: '添加文件' }).click();
         await (await chooser).setFiles({ name: 'service.log', mimeType: 'text/plain', buffer: Buffer.from('服务已就绪') });
         const draft = page.getByRole('textbox', { name: '消息输入框' });
         await expect(draft).toHaveValue('service.log\n服务已就绪');

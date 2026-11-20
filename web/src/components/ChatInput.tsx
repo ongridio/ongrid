@@ -105,7 +105,6 @@ export function ChatInput({
   const ref = useRef<HTMLTextAreaElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const textFileRef = useRef<HTMLInputElement | null>(null);
   const [readingFile, setReadingFile] = useState(false);
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [previewAttachment, setPreviewAttachment] = useState<PendingAttachment | null>(null);
@@ -256,56 +255,65 @@ export function ChatInput({
     setChips((prev) => prev.filter((_, i) => i !== idx));
   }
 
-  async function insertTextFile(file: File) {
+  async function addFiles(files: File[]) {
+    if (disabled || readingFile || !files.length) return;
     setAttachmentError('');
-    if (!TEXT_EXTENSIONS.some(ext => file.name.toLowerCase().endsWith(ext)) || file.size > MAX_TEXT_BYTES) {
-      setAttachmentError(tr('请选择 128 KiB 以内的 TXT、LOG、MD、CSV、JSON 或 YAML 文件', 'Choose a TXT, LOG, MD, CSV, JSON, or YAML file up to 128 KiB'));
+    const images: File[] = [];
+    const documents: File[] = [];
+    for (const file of files) {
+      if (ACCEPTED_IMAGE_TYPES.has(file.type) || (!file.type && /\.(png|jpe?g|webp)$/i.test(file.name))) {
+        if (file.size > MAX_IMAGE_BYTES) {
+          setAttachmentError(tr('单张图片不能超过 5 MiB', 'Each image must be 5 MiB or smaller'));
+          return;
+        }
+        images.push(file);
+      } else if (TEXT_EXTENSIONS.some(ext => file.name.toLowerCase().endsWith(ext))) {
+        if (file.size > MAX_TEXT_BYTES) {
+          setAttachmentError(tr(`文本文件 ${file.name} 超过 128 KiB`, `Text file ${file.name} exceeds 128 KiB`));
+          return;
+        }
+        documents.push(file);
+      } else {
+        setAttachmentError(tr(`不支持 ${file.name}。请选择 PNG、JPEG、WebP、TXT、LOG、MD、CSV、JSON 或 YAML 文件。`, `Unsupported file: ${file.name}. Choose PNG, JPEG, WebP, TXT, LOG, MD, CSV, JSON, or YAML.`));
+        return;
+      }
+    }
+    if (attachments.length + images.length > MAX_IMAGES) {
+      setAttachmentError(tr(`每条消息最多添加 ${MAX_IMAGES} 张图片`, `Up to ${MAX_IMAGES} images per message`));
       return;
     }
+    const imageBytes = [...attachments.map(a => a.file), ...images].reduce((sum, file) => sum + file.size, 0);
+    if (imageBytes > MAX_TOTAL_IMAGE_BYTES) {
+      setAttachmentError(tr('图片合计不能超过 20 MiB', 'Images must total 20 MiB or less'));
+      return;
+    }
+
     setReadingFile(true);
     try {
-      const text = new TextDecoder('utf-8', { fatal: true }).decode(await file.arrayBuffer());
-      if (!text.trim() || text.includes('\0')) {
-        setAttachmentError(tr('文件为空或包含二进制内容', 'The file is empty or contains binary data'));
-        return;
+      const sections: string[] = [];
+      for (const file of documents) {
+        const text = new TextDecoder('utf-8', { fatal: true }).decode(await file.arrayBuffer());
+        if (!text.trim() || text.includes('\0')) {
+          setAttachmentError(tr(`${file.name} 为空或包含二进制内容`, `${file.name} is empty or contains binary data`));
+          return;
+        }
+        sections.push(file.name + '\n' + text);
       }
       const input = ref.current;
       if (!input) return;
-      setValue([input.value, file.name + '\n' + text].filter(Boolean).join('\n\n'));
-      input.focus();
+      if (images.length) {
+        const previews = images.map(file => ({ file, previewURL: URL.createObjectURL(file) }));
+        setAttachments(prev => [...prev, ...previews]);
+      }
+      if (sections.length) {
+        setValue([input.value, ...sections].filter(Boolean).join('\n\n'));
+        input.focus();
+      }
     } catch {
       setAttachmentError(tr('无法读取文件，请选择 UTF-8 文本文件', 'Could not read this file. Choose a UTF-8 text file.'));
     } finally {
       setReadingFile(false);
     }
-  }
-
-  async function addImageFiles(files: FileList | File[]) {
-    const incoming = Array.from(files);
-    setAttachmentError('');
-    if (attachments.length + incoming.length > MAX_IMAGES) {
-      setAttachmentError(tr(`每条消息最多添加 ${MAX_IMAGES} 张图片`, `Up to ${MAX_IMAGES} images per message`));
-      return;
-    }
-    const next: PendingAttachment[] = [];
-    for (const file of incoming) {
-      if (!ACCEPTED_IMAGE_TYPES.has(file.type)) {
-        setAttachmentError(tr('仅支持 PNG、JPEG 和 WebP 图片', 'Only PNG, JPEG, and WebP images are supported'));
-        return;
-      }
-      if (file.size > MAX_IMAGE_BYTES) {
-        setAttachmentError(tr('单张图片不能超过 5 MiB', 'Each image must be 5 MiB or smaller'));
-        return;
-      }
-      next.push({ file, previewURL: URL.createObjectURL(file) });
-    }
-    const total = [...attachments, ...next].reduce((sum, item) => sum + item.file.size, 0);
-    if (total > MAX_TOTAL_IMAGE_BYTES) {
-      next.forEach((item) => URL.revokeObjectURL(item.previewURL));
-      setAttachmentError(tr('图片合计不能超过 20 MiB', 'Images must total 20 MiB or less'));
-      return;
-    }
-    setAttachments((prev) => [...prev, ...next]);
   }
 
   const submit = () => {
@@ -416,18 +424,18 @@ export function ChatInput({
           if (!allowAttachments) return;
           event.preventDefault();
           setDragActive(false);
-          void addImageFiles(event.dataTransfer.files);
+          void addFiles(Array.from(event.dataTransfer.files));
         }}
       >
         {allowAttachments && (
-          <>
-            <input ref={fileInputRef} type="file" accept=".png,.jpg,.jpeg,.webp" multiple hidden aria-label={tr('选择图片', 'Choose images')} onChange={(event) => { if (event.target.files) void addImageFiles(event.target.files); event.target.value = ''; }} />
-            <input ref={textFileRef} type="file" accept={TEXT_EXTENSIONS.join(',')} hidden aria-label={tr('选择文本文件', 'Choose a text file')} onChange={(event) => {
-              const file = event.target.files?.[0];
+          <input ref={fileInputRef} type="file" multiple hidden
+            accept={['.png', '.jpg', '.jpeg', '.webp', ...TEXT_EXTENSIONS].join(',')}
+            aria-label={tr('选择文件', 'Choose files')}
+            onChange={(event) => {
+              const files = Array.from(event.target.files ?? []);
               event.target.value = '';
-              if (file) void insertTextFile(file);
+              void addFiles(files);
             }} />
-          </>
         )}
         {attachments.length > 0 && (
           <div className="flex flex-wrap gap-2 px-4 pt-4" aria-label={tr('待发送图片', 'Images to send')}>
@@ -461,16 +469,14 @@ export function ChatInput({
             // Screenshots copied by browsers and desktop tools are commonly
             // exposed through DataTransferItemList, while clipboardData.files
             // may remain empty (notably on Windows/Chromium).
-            const itemImages = Array.from(event.clipboardData.items ?? [])
-              .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+            const itemFiles = Array.from(event.clipboardData.items ?? [])
+              .filter((item) => item.kind === 'file')
               .map((item) => item.getAsFile())
               .filter((file): file is File => file !== null);
-            const images = itemImages.length > 0
-              ? itemImages
-              : Array.from(event.clipboardData.files).filter((file) => file.type.startsWith('image/'));
-            if (images.length === 0) return;
+            const files = itemFiles.length > 0 ? itemFiles : Array.from(event.clipboardData.files);
+            if (files.length === 0) return;
             event.preventDefault();
-            void addImageFiles(images);
+            void addFiles(files);
           }}
           onClick={() => {
             // Recompute on click — caret may have moved into / out of
@@ -503,9 +509,7 @@ export function ChatInput({
         <div className="og-composer-actions flex items-center px-2 pb-3 pt-1 sm:gap-1 sm:px-3">
           <ChatActionsMenu
             disabled={disabled || readingFile}
-            onAddImage={allowAttachments ? () => fileInputRef.current?.click() : undefined}
-            imageLimitReached={attachments.length >= MAX_IMAGES}
-            onAddText={allowAttachments ? () => textFileRef.current?.click() : undefined}
+            onAddFiles={allowAttachments ? () => fileInputRef.current?.click() : undefined}
             webSearchEnabled={!!webSearchEnabled}
             onWebSearchToggle={onWebSearchToggle}
             onReference={(prompt) => {
