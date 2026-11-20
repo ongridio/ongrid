@@ -20,9 +20,9 @@ async function openUsage() {
   return { user, panel: within(screen.getByRole('dialog', { name: 'Context usage' })) };
 }
 
-it('charts the same input budget for the ring, total and categories, and keeps exact counts and window selection available', async () => {
+it('charts the same input budget for the ring, total and categories, and shows compact token details', async () => {
   const pick = vi.fn();
-  render(<ContextUsageIndicator capability={capability} selected={selected} usage={usage} onPick={pick} />);
+  render(<ContextUsageIndicator capability={capability} selected={selected} usage={{ ...usage, before: 76000, after: 4120 }} onPick={pick} />);
   expect(screen.getByRole('button', { name: 'Context usage' })).toHaveAccessibleDescription(/15\.1%/);
   const { user, panel } = await openUsage();
   expect(panel.getByText('15.1%')).toBeVisible();
@@ -34,7 +34,9 @@ it('charts the same input budget for the ring, total and categories, and keeps e
   expect(details.open).toBe(false);
   await user.click(panel.getByText('Token details'));
   expect(details.open).toBe(true);
-  expect(panel.getByText('20,813')).toBeVisible();
+  expect(within(details).getAllByRole('definition').map(row => row.textContent)).toEqual([
+    '36.8K / 243.8K', '5.5K', '30.6K', '632', '0', '8.2K', '20.8K', '76K → 4.1K',
+  ]);
   await act(async () => { panel.getByRole('combobox', { name: 'Context window' }).focus(); await user.keyboard('{ArrowDown}'); });
   expect(screen.getAllByRole('option').map(option => option.textContent)).toEqual(['Auto · 1M', '32K', '64K', '128K', '256K', '512K', '1M']);
   await act(async () => { await user.click(screen.getByRole('option', { name: '1M' })); });
@@ -50,7 +52,7 @@ it('shows counts without percentages when the deployment capacity is unknown', a
   expect(panel.getByRole('combobox')).toBeDisabled();
   expect(panel.getByRole('combobox')).toHaveTextContent('Auto · 256K');
   expect(panel.queryByRole('meter')).toBeNull();
-  expect(panel.getByText('30,648')).toBeVisible();
+  expect(panel.getByText('30.6K')).toBeVisible();
 });
 
 it('caps the visual meter at capacity but reports the full overage, and discards the previous model snapshot on switch', async () => {

@@ -76,7 +76,7 @@ export function ContextUsageIndicator({ capability, selected, usage, disabled, o
         <dl className="mb-3 mt-4 space-y-2">
           {categories.map(c => <div key={c.label} className="flex items-center justify-between gap-3">
             <dt className="flex items-center gap-2"><span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${c.color}`} />{c.label}</dt>
-            <dd className="tabular-nums text-text-muted" title={`${format(c.tokens)} tokens`}>{budget ? percent.format(c.tokens / budget) : format(c.tokens)}</dd>
+            <dd className="tabular-nums text-text-muted" title={`${format(c.tokens)} tokens`}>{budget ? percent.format(c.tokens / budget) : compact.format(c.tokens)}</dd>
           </div>)}
         </dl>
       </> : <p className="my-3 text-text-muted">{tr('发送消息后显示用量。', 'Send a message to see usage.')}</p>}
@@ -95,11 +95,11 @@ export function ContextUsageIndicator({ capability, selected, usage, disabled, o
           <ChevronRight size={14} className="group-open:rotate-90" />{tr('计数详情', 'Token details')}
         </summary>
         <dl className="my-2 space-y-1.5 tabular-nums">
-          {[[tr('预计输入 / 可用输入', 'Estimated / available input'), `${format(current.estimated)} / ${format(current.input_budget)}`],
-            ...(budget ? categories.map(c => [c.label, format(c.tokens)]) : []),
-            [tr('输出预留', 'Output reserve'), format(current.output_reserve)],
-            ...(current.reported ? [[tr('上次实测输入', 'Last reported input'), format(current.reported)]] : []),
-            ...(current.before ? [[tr('最近一次自动压缩', 'Last compaction'), current.after ? `${format(current.before)} → ${format(current.after)}` : format(current.before)]] : []),
+          {[[tr('预计输入 / 可用输入', 'Estimated / available input'), `${compact.format(current.estimated)} / ${compact.format(current.input_budget)}`],
+            ...(budget ? categories.map(c => [c.label, compact.format(c.tokens)]) : []),
+            [tr('输出预留', 'Output reserve'), compact.format(current.output_reserve)],
+            ...(current.reported ? [[tr('上次实测输入', 'Last reported input'), compact.format(current.reported)]] : []),
+            ...(current.before ? [[tr('最近一次自动压缩', 'Last compaction'), current.after ? `${compact.format(current.before)} → ${compact.format(current.after)}` : compact.format(current.before)]] : []),
           ].map(([key, value]) => <div key={key} className="flex justify-between gap-2"><dt>{key}</dt><dd>{value}</dd></div>)}
         </dl>
         <p>{tr('预计输入达到可用输入的 80% 时自动整理。', 'Context is compacted automatically at 80% of the available input budget.')}</p>

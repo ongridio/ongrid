@@ -102,7 +102,8 @@ for (const width of [390, 768, 1280, 1920]) {
       await page.keyboard.press('Escape');
       await page.screenshot({ path: test.info().outputPath('composer.png') });
       await panel.getByText(zh ? '计数详情' : 'Token details').click();
-      await expect(panel.getByText('20,813')).toBeVisible();
+      await expect(panel.locator('details dd')).toHaveText(['36.8K / 243.8K', '5.5K', '30.6K', '632', '0', '8.2K', '20.8K']);
+      await page.screenshot({ path: test.info().outputPath('token-details.png') });
       await page.keyboard.press('Escape');
       await expect(trigger).toBeFocused();
       if (width === 1280 && theme === 'light') {
