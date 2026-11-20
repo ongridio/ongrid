@@ -1,5 +1,6 @@
-import { Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, Label, Textarea } from '@/components/ui';
-import { ModelDropdown, WebSearchToggle } from '@/components/ChatModelControls';
+import { Button, Label, Textarea } from '@/components/ui';
+import { ChatActionsMenu } from './ChatActionsMenu';
+import { ModelDropdown } from '@/components/ChatModelControls';
 import {
   useEffect,
   useRef,
@@ -17,8 +18,6 @@ import {
   AlertTriangle,
   Bell,
   FileText,
-  ImagePlus,
-  Plus,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { isImeComposing } from '@/lib/keyboard';
@@ -65,10 +64,6 @@ type Props = {
   contextUsage?: ContextUsage;
   selectedModel?: ModelSelection | null;
   onModelChange?(m: ModelSelection): void;
-  // Globe toggle — when on, the chat send payload tells the agent to
-  // expose the manager-scoped `web_search` skill to the LLM. Default off
-  // so the model doesn't gratuitously search the public web on every
-  // metric question.
   webSearchEnabled?: boolean;
   onWebSearchToggle?(next: boolean): void;
   allowAttachments?: boolean;
@@ -506,24 +501,18 @@ export function ChatInput({
         )}
 
         <div className="og-composer-actions flex items-center px-2 pb-3 pt-1 sm:gap-1 sm:px-3">
-          {allowAttachments && (
-            <DropdownMenu>
-              <DropdownMenuTrigger render={<Button variant="plain" size="sm" />} disabled={disabled || readingFile}
-                aria-label={tr('添加附件', 'Add attachments')} title={tr('添加附件', 'Add attachments')}
-                className="w-7 shrink-0 p-0 text-text-muted hover:text-text">
-                <Plus size={18} />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent side="top" sideOffset={8}>
-                <DropdownMenuItem onClick={() => fileInputRef.current?.click()} disabled={attachments.length >= MAX_IMAGES}>
-                  <ImagePlus size={15} />{tr('上传图片', 'Upload images')}
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => textFileRef.current?.click()}>
-                  <FileText size={15} />{tr('插入文本文件', 'Insert text file')}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-          {onWebSearchToggle && <WebSearchToggle enabled={!!webSearchEnabled} onToggle={onWebSearchToggle} />}
+          <ChatActionsMenu
+            disabled={disabled || readingFile}
+            onAddImage={allowAttachments ? () => fileInputRef.current?.click() : undefined}
+            imageLimitReached={attachments.length >= MAX_IMAGES}
+            onAddText={allowAttachments ? () => textFileRef.current?.click() : undefined}
+            webSearchEnabled={!!webSearchEnabled}
+            onWebSearchToggle={onWebSearchToggle}
+            onReference={(prompt) => {
+              setValue([value, prompt].filter(Boolean).join('\n') + ' ');
+              requestAnimationFrame(() => ref.current?.focus());
+            }}
+          />
           <div className="ml-auto flex min-w-0 items-center justify-end">
             <ModelDropdown
               providers={providers ?? []}

@@ -38,7 +38,7 @@ import {
   unregisterChatTurnController,
 } from '@/lib/chatTurnRegistry';
 
-type LocationState = { initialPrompt?: string; initialAttachments?: File[] } | null;
+type LocationState = { initialPrompt?: string; initialAttachments?: File[]; initialWebSearchEnabled?: boolean } | null;
 
 export default function ChatThreadPage() {
   const { tr, locale } = useI18n();
@@ -100,7 +100,9 @@ export default function ChatThreadPage() {
   // enables it for a topic, every follow-up turn until they disable it
   // also exposes the skill. Defaults ON because SearXNG (default provider)
   // is zero-key zero-quota inside our compose stack — no cost to expose.
-  const [webSearchEnabled, setWebSearchEnabled] = useState(true);
+  const initialWebSearchEnabled = (location.state as LocationState)?.initialWebSearchEnabled ?? true;
+  const [webSearchEnabled, setWebSearchEnabled] = useState(initialWebSearchEnabled);
+  useEffect(() => setWebSearchEnabled(initialWebSearchEnabled), [sessionId, initialWebSearchEnabled]);
 
   useEffect(() => {
     let cancelled = false;

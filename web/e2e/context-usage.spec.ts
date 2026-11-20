@@ -25,6 +25,8 @@ for (const width of [390, 768, 1280, 1920]) {
           providers: [{ id: selected.provider, models: [model], reasoning_efforts: { [model]: ['medium', 'high'] }, context_windows: {
             [model]: { auto: 256000, source: 'provider', options: [128000, 256000, 1050000] },
           } }] } });
+        if (path.endsWith('/agents')) return route.fulfill({ json: { items: [{ name: 'specialist-network', description: '' }] } });
+        if (path.endsWith('/chat/sessions') && route.request().method() === 'POST') return route.fulfill({ json: session });
         if (path.endsWith('/chat/sessions')) return route.fulfill({ json: { items: [session], total: 1 } });
         if (path.endsWith('/context')) return route.fulfill({ json: session });
         return route.fulfill({ json: { items: [], total: 0 } });
@@ -33,11 +35,11 @@ for (const width of [390, 768, 1280, 1920]) {
       await page.goto('/chat/window-test');
       const title = zh ? '上下文用量' : 'Context usage';
       const trigger = page.getByRole('button', { name: title });
-      const add = page.getByRole('button', { name: zh ? '添加附件' : 'Add attachments' });
+      const add = page.getByRole('button', { name: zh ? '更多操作' : 'More actions', exact: true });
       const modelPicker = page.getByRole('combobox', { name: zh ? '选择模型' : 'Select model', exact: true });
       const effort = page.getByRole('combobox', { name: zh ? '推理级别' : 'Reasoning effort' });
       const send = page.getByRole('button', { name: zh ? '发送消息' : 'Send message' });
-      const toolbar = [add, page.getByRole('switch'), trigger, modelPicker, effort, send];
+      const toolbar = [add, trigger, modelPicker, effort, send];
       await expect(modelPicker).toHaveText(model);
       const boxes = await Promise.all(toolbar.map(async control => (await control.boundingBox())!));
       expect(await modelPicker.locator('span.truncate').evaluate(el => el.clientWidth)).toBeGreaterThan(44);
@@ -47,7 +49,7 @@ for (const width of [390, 768, 1280, 1920]) {
         expect(box.x + box.width).toBeLessThanOrEqual(width);
         expect(Math.abs(box.y + box.height / 2 - boxes[0].y - boxes[0].height / 2)).toBeLessThan(2);
       }
-      if (width >= 1280) expect(boxes[2].x - boxes[1].x - boxes[1].width).toBeGreaterThan(40);
+      if (width >= 1280) expect(boxes[1].x - boxes[0].x - boxes[0].width).toBeGreaterThan(40);
       const transparent = 'rgba(0, 0, 0, 0)';
       for (const name of [zh ? '选择模型' : 'Select model', zh ? '推理级别' : 'Reasoning effort']) {
         const picker = page.getByRole('combobox', { name, exact: true });
@@ -60,11 +62,25 @@ for (const width of [390, 768, 1280, 1920]) {
         await expect(picker).toBeFocused();
         await expect(picker).toHaveCSS('outline-style', 'solid');
       }
-      const search = page.getByRole('switch');
-      await search.click();
-      await expect(search).toHaveCSS('background-color', transparent);
-      await search.click();
-      await expect(search).toHaveCSS('background-color', transparent);
+      await add.click();
+      await expect(add).toHaveCSS('background-color', transparent);
+      const actions = page.getByRole('menu', { name: zh ? '更多操作' : 'More actions', exact: true });
+      await expect(actions.getByRole('menuitem')).toHaveCount(5);
+      await page.screenshot({ path: test.info().outputPath('composer-actions.png') });
+      await actions.getByRole('menuitem', { name: zh ? '专家' : 'Experts' }).click();
+      await page.getByRole('menuitem', { name: zh ? '网络专家' : 'Network specialist' }).click();
+      const input = page.getByRole('textbox', { name: zh ? '消息输入框' : 'Message input' });
+      await expect(input).toBeFocused();
+      await expect(input).toHaveValue(/specialist-network/);
+      await input.fill('');
+      await add.click();
+      await actions.getByRole('menuitem', { name: zh ? '模式' : 'Mode' }).click();
+      const mode = page.getByRole('menu', { name: zh ? '模式' : 'Mode', exact: true });
+      await expect(mode.getByRole('menuitemradio', { checked: true })).toHaveText(zh ? '自动联网' : 'Automatic web search');
+      const modeBox = (await mode.boundingBox())!;
+      expect(modeBox.x).toBeGreaterThanOrEqual(0);
+      expect(modeBox.x + modeBox.width).toBeLessThanOrEqual(width);
+      await mode.getByRole('menuitemradio', { name: zh ? '关闭联网搜索' : 'Web search off' }).click();
       await page.getByRole('combobox', { name: zh ? '选择模型' : 'Select model', exact: true }).hover();
       await page.screenshot({ path: test.info().outputPath('model-hover.png') });
       await trigger.click();
@@ -91,6 +107,7 @@ for (const width of [390, 768, 1280, 1920]) {
       await expect(trigger).toBeFocused();
       if (width === 1280 && theme === 'light') {
         await add.click();
+        await page.getByRole('menuitem', { name: '添加文件' }).click();
         const chooser = page.waitForEvent('filechooser');
         await page.getByRole('menuitem', { name: '插入文本文件' }).click();
         await (await chooser).setFiles({ name: 'service.log', mimeType: 'text/plain', buffer: Buffer.from('服务已就绪') });
@@ -99,7 +116,20 @@ for (const width of [390, 768, 1280, 1920]) {
         await expect(send).toBeEnabled();
         const sent = page.waitForRequest(req => req.url().endsWith('/messages/stream') && req.method() === 'POST');
         await send.click();
-        expect((await sent).postDataJSON().content).toBe('service.log\n服务已就绪');
+        const body = (await sent).postDataJSON();
+        expect(body.content).toBe('service.log\n服务已就绪');
+        expect(body.web_search_enabled).toBeFalsy();
+
+        await page.goto('/');
+        await add.click();
+        await actions.getByRole('menuitem', { name: '模式' }).click();
+        await mode.getByRole('menuitemradio', { name: '关闭联网搜索' }).click();
+        await input.fill('检查集群状态');
+        const firstTurn = page.waitForRequest(req => req.url().endsWith('/messages/stream') && req.method() === 'POST');
+        await send.click();
+        const firstBody = (await firstTurn).postDataJSON();
+        expect(firstBody.content).toBe('检查集群状态');
+        expect(firstBody.web_search_enabled).toBeFalsy();
       }
     });
   }

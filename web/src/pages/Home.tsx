@@ -248,7 +248,7 @@ export default function HomePage() {
       // through the SSE streamMessage path so the user sees tool cards and
       // the assistant reply incrementally. The picked model is already stored
       // on the new session, so every browser inherits the same route.
-      navigate(`/chat/${session.id}`, { state: { initialPrompt: content, initialAttachments: attachments } });
+      navigate(`/chat/${session.id}`, { state: { initialPrompt: content, initialAttachments: attachments, initialWebSearchEnabled: webSearchEnabled } });
     } catch (err) {
       setError((err as Error).message || tr('创建会话失败', 'Failed to create session'));
       setSubmitting(false);

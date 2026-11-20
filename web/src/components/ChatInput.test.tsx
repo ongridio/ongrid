@@ -1,4 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import * as agents from '@/api/agents';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -143,16 +145,38 @@ it('keeps the draft intact when a text file is too large or contains invalid UTF
   expect(screen.getByRole('textbox')).toHaveValue('check the logs');
 });
 
-it('toggles web search directly from the globe button', () => {
+it('groups composer actions and exposes the current search mode', async () => {
+  const user = userEvent.setup();
   const onToggle = vi.fn();
-  const view = (enabled: boolean) => <MemoryRouter><ChatInput onSubmit={vi.fn()} webSearchEnabled={enabled} onWebSearchToggle={onToggle} /></MemoryRouter>;
-  const { rerender } = render(view(true));
-  const globe = screen.getByRole('switch', { name: 'Disable web search' });
-  expect(globe.querySelector('svg')).toBeInTheDocument();
-  expect(globe).toHaveAttribute('aria-checked', 'true');
-  fireEvent.click(globe);
-  expect(onToggle).toHaveBeenLastCalledWith(false);
-  rerender(view(false));
-  fireEvent.click(screen.getByRole('switch', { name: 'Enable web search' }));
-  expect(onToggle).toHaveBeenLastCalledWith(true);
+  render(<MemoryRouter><ChatInput onSubmit={vi.fn()} allowAttachments webSearchEnabled onWebSearchToggle={onToggle} /></MemoryRouter>);
+  screen.getByRole('button', { name: 'More actions' }).focus();
+  await user.keyboard('{ArrowDown}');
+  expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['Add files', 'Mode', 'Experts', 'Skills', 'Connectors']);
+  screen.getByRole('menuitem', { name: 'Mode' }).focus();
+  await user.keyboard('{ArrowRight}');
+  expect(screen.getByRole('menuitemradio', { name: 'Automatic web search' })).toBeChecked();
+  fireEvent.click(screen.getByRole('menuitemradio', { name: 'Web search off' }));
+  expect(onToggle).toHaveBeenCalledWith(false);
+});
+
+it('loads experts when opened and adds the selected expert to the unsent draft', async () => {
+  const list = vi.spyOn(agents, 'listAgents').mockResolvedValue({ items: [{ name: 'specialist-network', description: '' }], total: 1 });
+  const user = userEvent.setup();
+  const onSubmit = vi.fn();
+  try {
+    render(<MemoryRouter><ChatInput onSubmit={onSubmit} /></MemoryRouter>);
+    const input = screen.getByRole('textbox');
+    await user.type(input, 'Check packet loss');
+    screen.getByRole('button', { name: 'More actions' }).focus();
+    await user.keyboard('{ArrowDown}');
+    expect(list).not.toHaveBeenCalled();
+    screen.getByRole('menuitem', { name: 'Experts' }).focus();
+    await user.keyboard('{ArrowRight}');
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Network specialist' }));
+    expect(input).toHaveValue('Check packet loss\nPlease ask the specialist-network expert to assist. ');
+    await waitFor(() => expect(input).toHaveFocus());
+    expect(onSubmit).not.toHaveBeenCalled();
+  } finally {
+    list.mockRestore();
+  }
 });
