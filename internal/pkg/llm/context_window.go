@@ -41,11 +41,12 @@ func (c WindowCapability) Options() []int {
 func (c WindowCapability) Supports(n int) bool { return n == 0 || slices.Contains(c.Options(), n) }
 
 func (c WindowCapability) Budget(selected int) (window, input, output int) {
-	window = c.Maximum()
-	if window == 0 {
-		window = DefaultWindow
-	} else if selected > 0 {
-		window = min(selected, window)
+	window = DefaultWindow
+	if maximum := c.Maximum(); maximum > 0 {
+		if selected > 0 {
+			window = selected
+		}
+		window = min(window, maximum)
 	}
 	output = min(8192, max(1, window/8))
 	if c.Output > 0 {

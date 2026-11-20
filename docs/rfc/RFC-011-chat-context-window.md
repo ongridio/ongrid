@@ -6,7 +6,7 @@ v3 每次调用模型前按 token 预算组装请求。一段聊天可以超过 
 
 Manager 读取供应商模型目录中的总窗口、输入和输出限制。目录缺少容量时，官方端点可匹配版本化的型号规格。管理员可以在「设置 → LLM 模型 → 部署上下文上限」为具体模型填写实际部署容量。已知的更小限制优先。同名代理和自建模型需要自己的元数据或配置。
 
-自动档采用已知的模型窗口或更小的部署上限。用户可以手动选择较小档位。查不到容量时，自动档采用 256,000 token 的本地预算，界面会标明使用默认值。聊天用量和自动摘要使用同一预算。在输入输出共享的模型上，先扣除输出预留，再受独立输入限额约束。计数余量最多 4,000 token。独立输入配额单独计算。输入文本和工具定义采用本地估算，图片按尺寸估算。供应商返回的输入用量单列显示。
+自动档默认使用 256,000 token。模型或部署上限更小时按该上限使用。用户可以在已知上限内手动选择窗口，包括大于 256K 的档位。查不到容量时，界面会标明使用默认值。聊天用量和自动摘要使用同一预算。在输入输出共享的模型上，先扣除输出预留，再受独立输入限额约束。计数余量最多 4,000 token。独立输入配额单独计算。输入文本和工具定义采用本地估算，图片按尺寸估算。供应商返回的输入用量单列显示。
 
 Gemini 官方端点通过原生模型目录获取输入和输出上限。OpenAI 兼容端点读取目录提供的容量字段。OpenRouter 同时参考首选部署的上下文和输出限制。DeepSeek 官方端点支持通过当前型号查询旧版 Flash 别名的容量。参考 [Google 模型目录](https://aistudio.google.com/api-reference/models)、[OpenRouter 模型目录](https://openrouter.ai/docs/guides/overview/models)、[DeepSeek 型号别名](https://api-docs.deepseek.com/quick_start/pricing/)、[Kimi 窗口规格](https://platform.kimi.com/docs/pricing/chat) 和 [MiniMax M2.7 模型配置](https://huggingface.co/MiniMaxAI/MiniMax-M2.7/blob/main/config.json)。
 

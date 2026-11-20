@@ -10,7 +10,7 @@ beforeEach(() => setLocale('en-US'));
 afterEach(() => { cleanup(); setLocale('zh-CN'); });
 
 const selected = { provider: 'custom', model: 'example', context_window_tokens: 256000 };
-const capability = { auto: 1050000, total: 1050000, source: 'provider', options: [32000, 64000, 128000, 256000, 512000, 1050000] };
+const capability = { auto: 256000, total: 1050000, source: 'provider', options: [32000, 64000, 128000, 256000, 512000, 1050000] };
 const usage: ContextUsage = { ...selected, known: true, estimated: 36775, window: 256000, input_budget: 243808,
   output_reserve: 8192, tools: 30648, instructions: 5495, tool_results: 0, reported: 20813, status: 'ready' };
 
@@ -38,7 +38,7 @@ it('charts the same input budget for the ring, total and categories, and shows c
     '36.8K / 243.8K', '5.5K', '30.6K', '632', '0', '8.2K', '20.8K', '76K → 4.1K',
   ]);
   await act(async () => { panel.getByRole('combobox', { name: 'Context window' }).focus(); await user.keyboard('{ArrowDown}'); });
-  expect(screen.getAllByRole('option').map(option => option.textContent)).toEqual(['Auto · 1M', '32K', '64K', '128K', '256K', '512K', '1M']);
+  expect(screen.getAllByRole('option').map(option => option.textContent)).toEqual(['Auto · 256K', '32K', '64K', '128K', '256K', '512K', '1M']);
   await act(async () => { await user.click(screen.getByRole('option', { name: '1M' })); });
   expect(pick).toHaveBeenCalledWith({ ...selected, context_window_tokens: 1050000 });
   await user.click(panel.getByRole('button', { name: 'Close' }));
