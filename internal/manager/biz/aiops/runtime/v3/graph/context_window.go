@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"slices"
@@ -417,13 +418,29 @@ func (m *windowModel) compact(ctx context.Context, part []*schema.Message, offse
 	m.observe(ctx, *u)
 	next, e := m.summarize(ctx, *previous, part[*offset:cut], budget, out, opts)
 	if e != nil {
-		return e
+		// A live tool step has no durable replay cursor. Only fall back for
+		// persisted turns, and only when the model could not finish valid notes.
+		if !historical || w.Save == nil || ctx.Err() != nil ||
+			(!errors.Is(e, llm.ErrIncompleteResponse) && !errors.Is(e, errInvalidSummary)) {
+			return e
+		}
+		var ok bool
+		next, ok = archivedExcerpts(*previous, part[*offset:cut], min(8192, budget/3))
+		if !ok {
+			return e
+		}
+		reason := "provider returned incomplete"
+		if errors.Is(e, errInvalidSummary) {
+			reason = e.Error() // validation messages contain no transcript content
+		}
+		slog.WarnContext(ctx, "using archived excerpts for context compaction", "model", w.Model, "reason", reason)
 	}
+	next = withResultReferences(next, part[*offset:cut])
 	freed := 0
 	for _, v := range part[*offset:cut] {
 		freed += count(savedView(v))
 	}
-	if count(summaryMessage(next)) >= freed+llm.EstimateText(*previous) {
+	if count(summaryMessage(next)) >= freed+llm.EstimateText(*previous) || llm.EstimateText(next) > budget/3 {
 		return fmt.Errorf("summary did not release space")
 	}
 	if historical && w.Save != nil {

@@ -1117,12 +1117,16 @@ func buildEinoHistory(rows []*aiopsmodel.Message) []*schema.Message {
 		if tm.ToolName != nil {
 			tname = *tm.ToolName
 		}
-		out = append(out, &schema.Message{
+		msg := &schema.Message{
 			Role:       schema.RoleType(aiopsmodel.RoleTool),
 			Content:    content,
 			ToolCallID: tcID,
 			ToolName:   tname,
-		})
+		}
+		if tm.ResultID != nil {
+			msg.Extra = map[string]any{"result_id": *tm.ResultID}
+		}
+		out = append(out, msg)
 		skipTool[j] = true
 	}
 	var owner *schema.Message

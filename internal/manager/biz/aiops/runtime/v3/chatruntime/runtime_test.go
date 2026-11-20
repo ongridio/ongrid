@@ -1011,7 +1011,7 @@ func TestBuildEinoHistory_DropsOrphanToolMessage(t *testing.T) {
 		{ID: "u0", Role: model.RoleUser, Content: strPtr("load + cpu?")},
 		asst,
 		// real get_host_processes response (correct id)
-		{ID: "t-a", Role: model.RoleTool, ToolCallID: strPtr(callA), ToolName: strPtr("get_host_processes"), Content: strPtr(`{"procs":[]}`)},
+		{ID: "t-a", Role: model.RoleTool, ToolCallID: strPtr(callA), ToolName: strPtr("get_host_processes"), Content: strPtr(`{"procs":[]}`), ResultID: strPtr("c89a0f02-e66f-465b-a161-9784a94d30bc")},
 		// ORPHAN: query_promql's real response stamped with the synthetic
 		// adapter id after the out-of-order completion.
 		{ID: "t-orphan", Role: model.RoleTool, ToolCallID: strPtr("query_promql|einoToolAdapter"), ToolName: strPtr("query_promql"), Content: strPtr(`{"resultType":"matrix"}`)},
@@ -1031,6 +1031,9 @@ func TestBuildEinoHistory_DropsOrphanToolMessage(t *testing.T) {
 			continue
 		}
 		toolCount++
+		if msg.ToolCallID == callA && msg.Extra["result_id"] != "c89a0f02-e66f-465b-a161-9784a94d30bc" {
+			t.Fatal("lost saved result ID for inline tool response")
+		}
 		if !valid[msg.ToolCallID] {
 			t.Errorf("orphan tool message survived: id=%q at %d", msg.ToolCallID, k)
 		}

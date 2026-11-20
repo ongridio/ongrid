@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,6 +18,9 @@ import (
 // The existing private reasoning field survives graph and database round trips.
 // A versioned envelope keeps Responses items out of visible text and other APIs.
 const responsesHistoryPrefix = "ongrid:responses:v1:"
+
+// ErrIncompleteResponse identifies an unfinished generation that did not report a policy rejection.
+var ErrIncompleteResponse = errors.New("responses: response status \"incomplete\"")
 
 type responsesHistory struct {
 	Model  string            `json:"model"`
@@ -228,11 +232,14 @@ func (t *responsesTransport) roundTripResponses(original *http.Request, chat ope
 	}
 	defer resp.Body.Close()
 	var result struct {
-		ID     string            `json:"id"`
-		Model  string            `json:"model"`
-		Status string            `json:"status"`
-		Output []json.RawMessage `json:"output"`
-		Usage  struct {
+		ID                string            `json:"id"`
+		Model             string            `json:"model"`
+		Status            string            `json:"status"`
+		Output            []json.RawMessage `json:"output"`
+		IncompleteDetails struct {
+			Reason string `json:"reason"`
+		} `json:"incomplete_details"`
+		Usage struct {
 			Input  int `json:"input_tokens"`
 			Output int `json:"output_tokens"`
 			Total  int `json:"total_tokens"`
@@ -240,6 +247,9 @@ func (t *responsesTransport) roundTripResponses(original *http.Request, chat ope
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("responses decode: %w", err)
+	}
+	if result.Status == "incomplete" && (result.IncompleteDetails.Reason == "" || result.IncompleteDetails.Reason == "max_output_tokens") {
+		return nil, ErrIncompleteResponse
 	}
 	if result.Status != "completed" {
 		return nil, fmt.Errorf("responses: response status %q", result.Status)

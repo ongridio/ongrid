@@ -149,3 +149,77 @@ func TestRejectedSummaryDoesNotAdvanceCursor(t *testing.T) {
 		t.Fatalf("failed summary: %+v, %v", u, e)
 	}
 }
+
+func TestDurableContextCompactionAt256K(t *testing.T) {
+	const turnID = "dd2960a7-739d-4017-87e6-f74a79b07284"
+	const resultID = "0958a974-44f8-4e1d-99cf-e1c060ddebba"
+	const invented = "71fb1a41-8fa0-4140-9ed0-cad30df46ea7"
+	const prior = "Approval is pending."
+	for _, tc := range []struct {
+		name     string
+		reply    *schema.Message
+		modelErr error
+		fallback bool
+	}{
+		{name: "complete", reply: schema.AssistantMessage("Host online; inspect the saved incident list.", nil)},
+		{name: "provider incomplete", modelErr: fmt.Errorf("provider: %w", llm.ErrIncompleteResponse), fallback: true},
+		{name: "exhausted output", reply: &schema.Message{Content: "truncated " + invented, ResponseMeta: &schema.ResponseMeta{Usage: &schema.TokenUsage{CompletionTokens: 8192}}}, fallback: true},
+		{name: "unverified evidence", reply: schema.AssistantMessage(invented, nil), fallback: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := newScriptedChatModel(tc.reply)
+			raw.st.genErr = tc.modelErr
+			state := &ContextWindow{Capability: llm.WindowCapability{Total: 1050000}, Summary: prior}
+			var saved string
+			state.Save = func(_ context.Context, boundary, notes string) error {
+				saved = notes
+				return nil
+			}
+			model := &windowModel{raw: raw, inner: raw, window: state}
+			source := schema.UserMessage("Investigate CPU. " + strings.Repeat("采样", 66000) + " Keep the node online.")
+			source.Extra = map[string]any{"context_row": turnID}
+			call := schema.AssistantMessage("", []schema.ToolCall{{ID: "call_1", Function: schema.FunctionCall{Name: "query_incidents"}}})
+			call.ReasoningContent = "private reasoning"
+			result := schema.ToolMessage(`{"open":0,"acknowledged":4}`, "call_1")
+			result.ToolName = "query_incidents"
+			result.Extra = map[string]any{"result_id": resultID}
+			current := currentContextMessage()
+			view, _, usage, err := model.prepare(context.Background(), []*schema.Message{source, call, result, current}, nil)
+			if limit := raw.st.lastMaxTokens; limit == nil || *limit != usage.OutputReserve {
+				t.Fatalf("summary did not receive the reserved completion budget: %v", limit)
+			}
+			if err != nil || usage.Window != 256000 || usage.Status != "compacted" || usage.After >= usage.Before ||
+				len(view) != 2 || view[1] != current || saved != state.Summary || !strings.Contains(saved, resultID) ||
+				strings.Contains(saved, invented) || strings.Contains(saved, call.ReasoningContent) {
+				t.Fatalf("compaction: %+v err=%v notes=%q", usage, err, saved)
+			}
+			if tc.fallback {
+				for _, want := range []string{prior, turnID, "Keep the node online.", "Archived conversation excerpts"} {
+					if !strings.Contains(saved, want) {
+						t.Fatalf("missing %q in archived notes", want)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestArchivedExcerptsRequireSuccessfulCheckpoint(t *testing.T) {
+	const previous = "Keep previous decisions."
+	source := schema.UserMessage(strings.Repeat("disk sample ", 750))
+	source.Extra = map[string]any{"context_row": "0ac81d0d-f936-42c8-b9d2-cac19041d4db"}
+	raw := newScriptedChatModel()
+	raw.st.genErr = llm.ErrIncompleteResponse
+	saves := 0
+	state := &ContextWindow{Capability: llm.WindowCapability{Total: 4096}, Summary: previous}
+	state.Save = func(context.Context, string, string) error {
+		saves++
+		return errors.New("checkpoint superseded")
+	}
+	m := &windowModel{raw: raw, window: state}
+	in := []*schema.Message{source, currentContextMessage()}
+	_, _, usage, err := m.prepare(context.Background(), in, nil)
+	if err != nil || saves != 1 || usage.Status != "deferred" || state.historyCut != 0 || state.Summary != previous {
+		t.Fatalf("lost history on failed save: %+v, err=%v, saves=%d", usage, err, saves)
+	}
+}
