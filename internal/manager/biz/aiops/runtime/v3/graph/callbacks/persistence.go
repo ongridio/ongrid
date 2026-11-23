@@ -816,7 +816,7 @@ func (h *PersistenceHandler) persistToolEnd(ctx context.Context, info *callbacks
 		h.recordErr("tool_call_update", err)
 	}
 	h.updateReplyToolCall(entry.rowID, status, resultPtr, errStr, endedAt)
-	_, resultID, _ := toolcapture.Get(ctx)
+	resultID := toolcapture.ResultID(ctx)
 	if resultID != "" {
 		if writer, ok := h.deps.Repo.(interface {
 			SetToolCallResultID(context.Context, string, string) error

@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cloudwego/eino/components/model"
@@ -39,10 +41,46 @@ type ContextWindow struct {
 	BudgetUser          uint64
 	historyCut, stepCut int
 	stepSummary         string
+	liveResults         liveToolResults
 	Reported            int
 	lastAttempt         string
 	LastBefore          int
 	LastAfter           int
+}
+
+// Eino returns text-only tool messages. Parallel tools publish trusted storage
+// links; the next model step binds each link to an absolute message position.
+// Call IDs can repeat across steps, so they are used only within the last batch.
+type liveToolResults struct {
+	pending    sync.Map
+	byPosition map[int]string
+}
+
+func (r *liveToolResults) bind(body []*schema.Message) {
+	for i := len(body) - 1; i >= 0 && body[i].Role == schema.Tool; i-- {
+		if id, ok := r.pending.LoadAndDelete(body[i].ToolCallID); ok {
+			if r.byPosition == nil {
+				r.byPosition = make(map[int]string)
+			}
+			r.byPosition[i] = id.(string)
+		}
+	}
+}
+
+func (r *liveToolResults) forSummary(part []*schema.Message, start int) []*schema.Message {
+	quoted := slices.Clone(part)
+	for i, msg := range quoted {
+		if id := r.byPosition[start+i]; id != "" {
+			copy := *msg
+			copy.Extra = maps.Clone(msg.Extra)
+			if copy.Extra == nil {
+				copy.Extra = make(map[string]any)
+			}
+			copy.Extra["result_id"] = id
+			quoted[i] = &copy
+		}
+	}
+	return quoted
 }
 
 type windowModel struct {
@@ -121,19 +159,20 @@ func windowCall[T any](ctx context.Context, m *windowModel, in []*schema.Message
 	}
 	// Keep an inferred retry budget local to this run. Only an explicit model
 	// limit can change the displayed capacity.
+	m.window.retryBudget = max(1, u.Estimated*3/4)
 	if len(match) > 0 {
 		limit, e := strconv.Atoi(strings.ReplaceAll(match[1], ",", ""))
 		if e == nil && limit >= 1024 && limit < u.Window {
 			m.window.Capability.Total = limit
 			m.window.Capability.Source = "provider_error"
+			m.window.retryBudget = 0
 		}
 	}
-	m.window.retryBudget = max(1, u.Estimated*3/4)
 	next, options, nextUsage, prepareErr := m.prepare(ctx, in, opts)
 	if prepareErr != nil {
 		return zero, nextUsage, prepareErr
 	}
-	if nextUsage.Estimated >= u.Estimated {
+	if nextUsage.Estimated >= u.Estimated && nextUsage.OutputReserve >= u.OutputReserve {
 		return result, u, err
 	}
 	result, err = call(ctx, next, options...)
@@ -291,6 +330,7 @@ func (m *windowModel) prepare(ctx context.Context, in []*schema.Message, opts []
 	}
 	hist := in[start:front]
 	body := in[min(current+1, len(in)):]
+	w.liveResults.bind(body)
 	view := func() []*schema.Message {
 		v := slices.Clone(in[:start])
 		if w.Summary != "" {
@@ -427,7 +467,11 @@ func (m *windowModel) compact(ctx context.Context, part []*schema.Message, offse
 	u.Status = "compacting"
 	m.observe(ctx, *u)
 	priorNotes, priorRefs := splitResultReferences(*previous)
-	next, e := m.summarize(ctx, priorNotes, part[*offset:cut], budget, out, opts)
+	batch := part[*offset:cut]
+	if !historical {
+		batch = w.liveResults.forSummary(batch, *offset)
+	}
+	next, e := m.summarize(ctx, priorNotes, batch, budget, out, opts)
 	mode := "summary"
 	if e != nil {
 		// A live tool step has no durable replay cursor. Only fall back for
@@ -448,7 +492,7 @@ func (m *windowModel) compact(ctx context.Context, part []*schema.Message, offse
 		}
 		slog.WarnContext(ctx, "using archived excerpts for context compaction", "model", w.Model, "reason", reason)
 	}
-	next = withResultReferences(next, priorRefs, part[*offset:cut])
+	next = withResultReferences(next, priorRefs, batch)
 	freed := 0
 	for _, v := range part[*offset:cut] {
 		freed += count(savedView(v))
@@ -472,6 +516,9 @@ func (m *windowModel) compact(ctx context.Context, part []*schema.Message, offse
 		w.Revision++
 		w.LastCompaction = &saved
 		u.LastCompaction = &saved
+	}
+	if !historical {
+		slog.InfoContext(ctx, "compacted current-turn tool steps", "session_id", w.SessionID, "window", u.Window, "from_message", *offset, "to_message", cut)
 	}
 	*previous = next
 	*offset = cut

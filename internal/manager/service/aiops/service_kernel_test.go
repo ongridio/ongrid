@@ -237,3 +237,28 @@ func TestTurnRejectionEndsAtRuntimeDispatch(t *testing.T) {
 		}
 	}
 }
+
+type timelineSessions struct {
+	*memSessions
+	reads int
+}
+
+func (r *timelineSessions) ListMessageMetadata(_ context.Context, id string) ([]*model.Message, error) {
+	r.reads++
+	return []*model.Message{{SessionID: id, Attachments: []model.Attachment{{Size: 21 << 20}}}}, nil
+}
+
+func TestTimelineAndImageBudgetReadMetadata(t *testing.T) {
+	repo := &timelineSessions{memSessions: &memSessions{sessions: map[string]*model.Session{"s": {ID: "s", UserID: 7}}}}
+	s := New(nil, repo, nil, nil)
+	if _, err := s.ListMessages(t.Context(), Caller{UserID: 8}, "s"); !errors.Is(err, errs.ErrNotFound) || repo.reads != 0 {
+		t.Fatalf("foreign session: reads=%d err=%v", repo.reads, err)
+	}
+	rows, err := s.ListMessages(t.Context(), Caller{UserID: 7}, "s")
+	if err != nil || len(rows) != 1 || rows[0].SessionID != "s" {
+		t.Fatalf("timeline: rows=%+v err=%v", rows, err)
+	}
+	if err := s.validateImageContext(t.Context(), "s", &chatprotocol.RunOptions{}); !errors.Is(err, errs.ErrInvalid) || repo.reads != 2 {
+		t.Fatalf("image budget: reads=%d err=%v", repo.reads, err)
+	}
+}

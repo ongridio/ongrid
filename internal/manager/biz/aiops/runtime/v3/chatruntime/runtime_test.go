@@ -1147,3 +1147,23 @@ func TestContextReusedCallIDsKeepTheirOwnEvidence(t *testing.T) {
 		t.Fatalf("mixed tool evidence: %+v", msgs)
 	}
 }
+
+func TestIncompleteReplayPinsOnlyUnfinishedCalls(t *testing.T) {
+	for _, status := range []string{model.StatusPending, model.StatusSuccess, model.StatusError, model.StatusTimeout} {
+		t.Run(status, func(t *testing.T) {
+			rows := []*model.Message{
+				{ID: "u0", Role: model.RoleUser, Content: strPtr("inventory")},
+				{ID: "a0", Role: model.RoleAssistant, ToolCalls: []model.ToolCall{{ToolName: "query_devices", LLMCallID: strPtr("c1"), Status: status}}},
+				{ID: "current", Role: model.RoleUser, Content: strPtr("status?")},
+			}
+			history := buildEinoHistory(rows)
+			pending := status == model.StatusPending
+			if (history[0].Extra["unfinished_context_turn"] == true) != pending {
+				t.Fatalf("unexpected pin for %s", status)
+			}
+			if !pending && (len(history) != 2 || len(history[1].ToolCalls) != 0 || !contains(history[1].Content, "query_devices ("+status+")")) {
+				t.Fatalf("missing terminal status in replay: %+v", history)
+			}
+		})
+	}
+}

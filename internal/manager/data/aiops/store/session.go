@@ -273,6 +273,15 @@ func (r *SessionRepo) AppendMessage(ctx context.Context, m *model.Message) error
 // the following role=tool messages become orphans, which strict LLM
 // providers reject with HTTP 400 "tool must follow tool_calls".
 func (r *SessionRepo) ListMessages(ctx context.Context, sessionID string, limit int) ([]*model.Message, error) {
+	return r.listMessages(ctx, sessionID, limit, false)
+}
+
+// ListMessageMetadata supplies the chat timeline without opening attachment files.
+func (r *SessionRepo) ListMessageMetadata(ctx context.Context, sessionID string) ([]*model.Message, error) {
+	return r.listMessages(ctx, sessionID, 0, true)
+}
+
+func (r *SessionRepo) listMessages(ctx context.Context, sessionID string, limit int, metadataOnly bool) ([]*model.Message, error) {
 	tx := r.db.WithContext(ctx).Model(&model.Message{}).Where("session_id = ?", sessionID).Order("created_at ASC, id ASC")
 	if limit > 0 {
 		tx = r.db.WithContext(ctx).
@@ -296,7 +305,7 @@ func (r *SessionRepo) ListMessages(ctx context.Context, sessionID string, limit 
 	if err := r.hydrateToolResults(ctx, out); err != nil {
 		return nil, err
 	}
-	if err := r.hydrateAttachments(ctx, out); err != nil {
+	if err := r.hydrateAttachments(ctx, out, metadataOnly); err != nil {
 		return nil, err
 	}
 	return out, nil

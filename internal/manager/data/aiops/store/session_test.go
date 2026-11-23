@@ -65,6 +65,25 @@ func TestAttachmentUploadBindHydrateAndDelete(t *testing.T) {
 		t.Fatalf("hydrated attachments = %+v", rows)
 	}
 	path := rows[0].Attachments[0].StoragePath
+	// The chat timeline must still list metadata if the blob is offline.
+	if err := os.Rename(path, path+".offline"); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := repo.ListMessageMetadata(ctx, s.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 || len(listed[0].Attachments) != 1 {
+		t.Fatalf("missing attachment metadata: %+v", listed)
+	}
+	meta := listed[0].Attachments[0]
+	if meta.ID != a.ID || meta.Size != int64(len(data)) || len(meta.Data) != 0 {
+		t.Fatalf("unexpected metadata: %+v", meta)
+	}
+	if err := os.Rename(path+".offline", path); err != nil {
+		t.Fatal(err)
+	}
+
 	if err := repo.DeleteSession(ctx, s.ID); err != nil {
 		t.Fatal(err)
 	}

@@ -1161,44 +1161,37 @@ func buildEinoHistory(rows []*aiopsmodel.Message) []*schema.Message {
 		case aiopsmodel.RoleAssistant:
 			calls, ok := callIDs[m.ID]
 			toolIdx := results[m.ID]
-			if owner != nil {
-				for _, tc := range m.ToolCalls {
-					if tc.Status == aiopsmodel.StatusPending {
-						owner.Extra["unfinished_context_turn"] = true
+			complete := ok || len(m.ToolCalls) == 0
+			for _, call := range calls {
+				if j, found := toolIdx[call.ID]; !found || j >= end {
+					complete = false
+				}
+			}
+			var closed []string
+			for _, tc := range m.ToolCalls {
+				switch tc.Status {
+				case aiopsmodel.StatusSuccess, aiopsmodel.StatusError, aiopsmodel.StatusTimeout:
+					if !complete {
+						note := tc.ToolName + " (" + tc.Status + ")"
+						if tc.ResultID != nil {
+							note += " result_id=" + *tc.ResultID
+						}
+						closed = append(closed, note)
 					}
-				}
-				if len(m.ToolCalls) > 0 && !ok {
-					owner.Extra["unfinished_context_turn"] = true
-				}
-				for _, call := range calls {
-					if j, found := toolIdx[call.ID]; !found || j >= end {
+				default:
+					if owner != nil && (tc.Status == aiopsmodel.StatusPending || !complete) {
 						owner.Extra["unfinished_context_turn"] = true
 					}
 				}
 			}
-			if len(m.ToolCalls) > 0 && !ok {
+			if !complete {
+				// Strict providers require a result for each call in a batch.
+				// Keep the recorded terminal status without inventing tool output.
+				if len(closed) > 0 {
+					out = append(out, schema.AssistantMessage("Historical tool batch has incomplete responses: "+strings.Join(closed, ", "), nil))
+				}
 				toolreplay.MarkDependentToolsForSkip(rows, i, len(m.ToolCalls), skipTool)
 				continue
-			}
-			// Precheck: every tool_call we'd emit must have a hoistable
-			// response inside the current window. If any is missing
-			// (parallel ToolsNode dropped an OnEnd → chat_tool_calls
-			// row written but no role=tool chat_messages row), drop the
-			// whole assistant turn + its dependent tools rather than
-			// send an envelope strict providers reject with HTTP 400
-			// "insufficient tool messages following tool_calls".
-			if ok && len(calls) > 0 {
-				complete := true
-				for _, tc := range calls {
-					if j, found := toolIdx[tc.ID]; !found || j >= end {
-						complete = false
-						break
-					}
-				}
-				if !complete {
-					toolreplay.MarkDependentToolsForSkip(rows, i, len(calls), skipTool)
-					continue
-				}
 			}
 			content := ""
 			if m.Content != nil {

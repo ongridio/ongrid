@@ -13,7 +13,9 @@ import (
 	aiops "github.com/ongridio/ongrid/internal/manager/model/aiops"
 	openai "github.com/sashabaranov/go-openai"
 
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	"github.com/ongridio/ongrid/internal/pkg/llm"
+	"github.com/ongridio/ongrid/internal/pkg/toolcapture"
 )
 
 func currentContextMessage() *schema.Message {
@@ -357,5 +359,77 @@ func TestResultIndexDoesNotConsumeLegacyProse(t *testing.T) {
 		if notes != legacy || (input == legacy) != (refs == "") {
 			t.Fatal(notes, refs)
 		}
+	}
+}
+
+func TestExplicitLimitRetriesShortInputWithSmallerOutput(t *testing.T) {
+	raw := newScriptedChatModel()
+	m := &windowModel{inner: raw, raw: raw, window: &ContextWindow{}}
+	input := []*schema.Message{schema.SystemMessage("rules"), currentContextMessage()}
+	calls := 0
+	got, u, err := windowCall(t.Context(), m, input, nil, func(_ context.Context, msgs []*schema.Message, opts ...model.Option) (string, error) {
+		calls++
+		out := *model.GetCommonOptions(&model.Options{}, opts...).MaxTokens
+		if calls == 1 {
+			return "", &openai.APIError{HTTPStatusCode: 400, Code: "context_length_exceeded", Message: "maximum context length is 4096 tokens"}
+		}
+		if len(msgs) != len(input) || out != 512 {
+			t.Fatalf("retry: %d messages, %d output tokens", len(msgs), out)
+		}
+		return "ok", nil
+	})
+	_, want, _ := (llm.WindowCapability{Total: 4096}).Budget(0)
+	if err != nil || got != "ok" || calls != 2 || u.InputBudget != want {
+		t.Fatalf("calls=%d usage=%+v err=%v", calls, u, err)
+	}
+}
+
+type savedTestTool struct {
+	*fakeBaseTool
+	id string
+}
+
+func (t *savedTestTool) InvokableRun(ctx context.Context, args string, opts ...basetool.InvokeOption) (string, error) {
+	toolcapture.Link(ctx, t.id)
+	return t.fakeBaseTool.InvokableRun(ctx, args, opts...)
+}
+
+func TestLiveToolLinksSurviveConsecutiveCompactionAt256K(t *testing.T) {
+	const firstID = "7ad95cd8-86e5-4aae-984f-80c580d43531"
+	const secondID = "9442aef2-b08f-433c-9f03-823560551c40"
+	first := &savedTestTool{&fakeBaseTool{name: "query_devices", class: "read", runResp: `{"device_id":72}`}, firstID}
+	second := &savedTestTool{&fakeBaseTool{name: "get_metrics", class: "read", runResp: strings.Repeat("采", 132000)}, secondID}
+	// Some providers reuse call IDs on subsequent model steps.
+	model := newScriptedChatModel(
+		makeAssistantToolCall(strings.Repeat("Inventory scope. ", 100), "call_0", "query_devices", "{}"),
+		makeAssistantToolCall("", "call_0", "get_metrics", `{"page":1}`),
+		makeAssistantNoTools("Checked inventory."),
+		makeAssistantToolCall("", "call_0", "get_metrics", `{"page":2}`),
+		makeAssistantNoTools("Checked inventory and the first metrics page."),
+		makeAssistantNoTools("done"),
+	)
+	window := &ContextWindow{Capability: llm.WindowCapability{Total: 256000}}
+	graph, err := BuildReActGraph(model, []basetool.BaseTool{first, second}, Config{Context: window, MaxIterations: 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := graph.Invoke(t.Context(), &Input{UserText: "Check the devices and metrics"}); err != nil {
+		t.Fatal(err)
+	}
+	if window.stepCut != 4 {
+		t.Fatalf("compacted %d messages, want two complete exchanges", window.stepCut)
+	}
+	last := model.st.inputsLog[len(model.st.inputsLog)-1]
+	var notes string
+	for _, msg := range last {
+		if msg.Content == first.runResp {
+			t.Fatal("first tool was still in raw context")
+		}
+		if strings.Contains(msg.Content, resultReferenceHeader) {
+			notes = msg.Content
+		}
+	}
+	if !strings.Contains(notes, "query_devices: "+firstID) || !strings.Contains(notes, "get_metrics: "+secondID) {
+		t.Fatalf("missing stored links in handoff: %s", notes)
 	}
 }

@@ -21,6 +21,8 @@ capabilities:
     max_tool_calls: 12
 can_delegate: true
 tools:
+  - read_archived_chat
+  - read_tool_result
   - query_knowledge
   - host_probe_http
   - host_probe_dns

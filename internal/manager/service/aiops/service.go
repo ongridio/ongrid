@@ -369,6 +369,15 @@ func (s *Service) ListMessages(ctx context.Context, caller Caller, sessionID str
 	if _, err := s.GetSession(ctx, caller, sessionID); err != nil {
 		return nil, err
 	}
+	return s.listMessageMetadata(ctx, sessionID)
+}
+
+func (s *Service) listMessageMetadata(ctx context.Context, sessionID string) ([]*model.Message, error) {
+	if reader, ok := s.sessions.(interface {
+		ListMessageMetadata(context.Context, string) ([]*model.Message, error)
+	}); ok {
+		return reader.ListMessageMetadata(ctx, sessionID)
+	}
 	return s.sessions.ListMessages(ctx, sessionID, 0)
 }
 
@@ -546,7 +555,7 @@ func (s *Service) validateImageContext(ctx context.Context, sessionID string, op
 	for _, attachment := range opts.Attachments {
 		total += attachment.Size
 	}
-	history, err := s.sessions.ListMessages(ctx, sessionID, 0)
+	history, err := s.listMessageMetadata(ctx, sessionID)
 	if err != nil {
 		return err
 	}

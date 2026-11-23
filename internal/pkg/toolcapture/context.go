@@ -34,6 +34,16 @@ func Link(ctx context.Context, resultID string) {
 	}
 }
 
+// ResultID reads only the storage link; raw captures can be many megabytes.
+func ResultID(ctx context.Context) string {
+	if s, ok := ctx.Value(key{}).(*State); ok {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.resultID
+	}
+	return ""
+}
+
 func Get(ctx context.Context) (raw []byte, resultID string, partial bool) {
 	if s, ok := ctx.Value(key{}).(*State); ok {
 		s.mu.Lock()
