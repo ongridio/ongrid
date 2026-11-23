@@ -18,6 +18,18 @@ type ContextCompaction struct {
 	After   int       `json:"after"`
 }
 
+// ArchivedToolReference identifies the saved evidence without loading its payload.
+type ArchivedToolReference struct {
+	ResultID  string    `json:"result_id"`
+	ToolName  string    `json:"tool_name"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type ArchivedToolPage struct {
+	Results []ArchivedToolReference `json:"results"`
+	Next    int                     `json:"next,omitempty"`
+}
+
 type ArchivedChatPassage struct {
 	ID    string `json:"message_id"`
 	Role  string `json:"role"`

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -127,4 +128,50 @@ func testContextCursor(t *testing.T, r *SessionRepo) {
 		t.Fatal("stale compactor overwrote a repair", e)
 	}
 
+}
+
+func TestArchivedToolResultPages(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql"} {
+		t.Run(dialect, func(t *testing.T) {
+			r := newReasoningTestRepo(t, dialect)
+			ctx := t.Context()
+			s := &model.Session{UserID: 7, Title: "saved evidence"}
+			if err := r.CreateSession(ctx, s); err != nil {
+				t.Fatal(err)
+			}
+			start := time.Now().UTC().Truncate(time.Second)
+			name := "query_devices"
+			for i := 0; i < 18; i++ {
+				id := fmt.Sprintf("0958a974-44f8-4e1d-99cf-%012d", i)
+				row := &model.Message{SessionID: s.ID, Role: model.RoleTool, ResultID: &id, ToolName: &name, CreatedAt: start.Add(time.Duration(i) * time.Second)}
+				if err := r.AppendMessage(ctx, row); err != nil {
+					t.Fatal(err)
+				}
+			}
+			bound := &model.Message{SessionID: s.ID, Role: model.RoleUser, CreatedAt: start.Add(17*time.Second - time.Millisecond)}
+			if err := r.AppendMessage(ctx, bound); err != nil {
+				t.Fatal(err)
+			}
+			if err := r.BeginContextTurn(ctx, s.ID, bound.ID); err != nil {
+				t.Fatal(err)
+			}
+			if ok, err := r.SaveContextCheckpoint(ctx, s.ID, bound.ID, 0, model.ContextCheckpoint{FromID: bound.ID, FromTime: bound.CreatedAt}); err != nil || !ok {
+				t.Fatal(ok, err)
+			}
+			first, err := r.ArchivedToolResults(ctx, s.ID, 7, name, 0)
+			if err != nil || len(first.Results) != 16 || first.Next != 16 || first.Results[0].ResultID != "0958a974-44f8-4e1d-99cf-000000000000" {
+				t.Fatal(first, err)
+			}
+			last, err := r.ArchivedToolResults(ctx, s.ID, 7, name, first.Next)
+			if err != nil || len(last.Results) != 1 || last.Next != 0 || last.Results[0].ResultID != "0958a974-44f8-4e1d-99cf-000000000016" {
+				t.Fatal(last, err)
+			}
+			if page, err := r.ArchivedToolResults(ctx, s.ID, 7, "query_incidents", 0); err != nil || len(page.Results) != 0 {
+				t.Fatal(page, err)
+			}
+			if _, err := r.ArchivedToolResults(ctx, s.ID, 8, name, 0); err == nil {
+				t.Fatal("another owner's tool evidence was accessible")
+			}
+		})
+	}
 }

@@ -101,56 +101,129 @@ func (m *windowModel) generateSummary(ctx context.Context, messages []*schema.Me
 	}
 }
 
-// Keep all saved tool results in the covered turns addressable, including
-// small inline results whose JSON does not itself contain a result ID.
-func withResultReferences(notes string, messages []*schema.Message) string {
-	var refs strings.Builder
-	seen := make(map[string]bool)
-	for _, msg := range messages {
-		id, _ := msg.Extra["result_id"].(string)
-		if msg.Role != schema.Tool || id == "" || seen[id] || uuid.Validate(id) != nil {
-			continue
-		}
-		seen[id] = true
-		if !strings.Contains(notes, id) {
-			fmt.Fprintf(&refs, "\n%s: %s", msg.ToolName, id)
+const resultReferenceHeader = "\nSaved tool results:\n"
+
+// Older checkpoints can contain this heading inside free-form notes. Only
+// detach a trailing index consisting entirely of named UUIDs.
+func splitResultReferences(summary string) (notes, refs string) {
+	at := strings.LastIndex(summary, resultReferenceHeader)
+	if at < 0 {
+		return summary, ""
+	}
+	tail := summary[at+len(resultReferenceHeader):]
+	for line := range strings.SplitSeq(tail, "\n") {
+		_, id, ok := strings.Cut(line, ": ")
+		if !ok || uuid.Validate(id) != nil {
+			return summary, ""
 		}
 	}
-	if refs.Len() == 0 {
-		return notes
-	}
-	return notes + "\nSaved tool results:" + refs.String()
+	return summary[:at], tail
 }
 
-// Use excerpts only for history with durable source rows. Carry the previous
-// notes verbatim; make omissions explicit and keep the original turns intact.
+// Keep a bounded first/latest index outside the model-generated notes. The
+// complete index, including results from legacy checkpoints, lives in chat_messages.
+func withResultReferences(notes, previous string, messages []*schema.Message) string {
+	const maxRefs = 32
+	var refs []string
+	seen := map[string]bool{}
+	add := func(name, id string) {
+		if uuid.Validate(id) == nil && !seen[id] {
+			seen[id] = true
+			refs = append(refs, name+": "+id)
+		}
+	}
+	for line := range strings.SplitSeq(previous, "\n") {
+		if name, id, ok := strings.Cut(line, ": "); ok {
+			add(name, id)
+		}
+	}
+	for _, msg := range messages {
+		if msg.Role == schema.Tool {
+			id, _ := msg.Extra["result_id"].(string)
+			add(msg.ToolName, id)
+		}
+	}
+	if len(refs) == 0 {
+		return notes
+	}
+	if len(refs) > maxRefs {
+		refs = append(refs[:maxRefs/2], refs[len(refs)-maxRefs/2:]...)
+	}
+	// The generated handoff may quote an old footer. Keep exactly one
+	// machine-written index at the end for the next compaction.
+	notes = strings.ReplaceAll(notes, resultReferenceHeader, "\nTool evidence:\n")
+	return notes + resultReferenceHeader + strings.Join(refs, "\n")
+}
+
 func archivedExcerpts(previous string, messages []*schema.Message, limit int) (string, bool) {
-	var notes strings.Builder
-	notes.WriteString(previous)
-	notes.WriteString("\nArchived conversation excerpts (abridged; original messages remain in chat):")
-	width := min(320, (limit-llm.EstimateText(notes.String()))/(2*len(messages)))
-	if width < 16 {
+	const heading = "\nArchived conversation excerpts (abridged; original messages remain in chat):"
+	if len(messages) == 0 {
 		return "", false
 	}
+	// Reserve room for new evidence. Keep complete recent excerpt lines when
+	// rotating older batches, so retained message IDs stay readable.
+	if llm.EstimateText(previous) > limit/2 {
+		turns := strings.Split(previous, "\nTurn ")
+		remaining := limit / 2
+		i := len(turns)
+		for i > 1 {
+			cost := llm.EstimateText("\nTurn " + turns[i-1])
+			if cost > remaining {
+				break
+			}
+			remaining -= cost
+			i--
+		}
+		if i < len(turns) {
+			previous = "Turn " + strings.Join(turns[i:], "\nTurn ")
+		} else {
+			previous = excerptText(previous, max(4, limit/4))
+		}
+	}
+	remaining := limit - llm.EstimateText(previous+heading)
+	width := max(16, min(320, remaining/(2*len(messages))))
+	// Build complete exchanges so an excerpt never inherits another turn's ID.
+	var turns []string
+	var turn strings.Builder
 	for _, msg := range messages {
 		if msg.Role == schema.User {
 			id, _ := msg.Extra["context_row"].(string)
 			if uuid.Validate(id) != nil {
 				return "", false
 			}
-			fmt.Fprintf(&notes, "\nTurn %s", id)
+			if turn.Len() > 0 {
+				turns = append(turns, turn.String())
+				turn.Reset()
+			}
+			fmt.Fprintf(&turn, "\nTurn %s", id)
 		}
-		content := strings.TrimSpace(msg.Content)
 		if len(msg.UserInputMultiContent) > 0 {
-			fmt.Fprintf(&notes, "\n%d attachment part(s)", len(msg.UserInputMultiContent))
+			fmt.Fprintf(&turn, "\n%d attachment part(s)", len(msg.UserInputMultiContent))
 		}
-		if content == "" {
+		if content := strings.TrimSpace(msg.Content); content != "" {
+			fmt.Fprintf(&turn, "\n%s %s %q", msg.Role, msg.ToolName, excerptText(content, width))
+		}
+	}
+	turns = append(turns, turn.String())
+	// For unusually dense exchanges keep their original turn pointer even
+	// when the individual excerpts do not fit.
+	for i := len(turns) - 1; i >= 0; i-- {
+		entry := turns[i]
+		if llm.EstimateText(entry) > remaining {
+			first, _, _ := strings.Cut(strings.TrimPrefix(entry, "\n"), "\n")
+			entry = "\n" + first
+		}
+		cost := llm.EstimateText(entry)
+		if cost > remaining {
+			turns[i] = ""
 			continue
 		}
-		content = excerptText(content, width)
-		fmt.Fprintf(&notes, "\n%s %s %q", msg.Role, msg.ToolName, content)
+		turns[i] = entry
+		remaining -= cost
 	}
-	return notes.String(), llm.EstimateText(notes.String()) <= limit
+	batch := strings.Join(turns, "")
+	notes := previous + heading + batch
+	return notes, strings.HasPrefix(batch, "\nTurn ") && llm.EstimateText(notes) <= limit
 }
 
 func (m *windowModel) summarize(ctx context.Context, previous string, part []*schema.Message, budget, out int, opts []model.Option) (string, error) {

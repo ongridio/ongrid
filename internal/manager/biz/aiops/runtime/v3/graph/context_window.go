@@ -190,7 +190,7 @@ func control(msg *schema.Message) bool {
 			return true
 		}
 	}
-	return v.Kind == "config_draft" || v.Kind == "pending_approval" || v.DraftHash != "" || (v.ApprovalID != "" && (v.Status == "pending" || v.Status == ""))
+	return v.Kind == "config_draft" || v.Kind == "pending_approval" || (v.Kind == "" && v.DraftHash != "") || (v.ApprovalID != "" && (v.Status == "pending" || v.Status == ""))
 }
 
 func toolTokens(tools []*schema.ToolInfo) (int, error) {
@@ -403,7 +403,11 @@ func (m *windowModel) compact(ctx context.Context, part []*schema.Message, offse
 		}
 		pinned := false
 		for _, v := range part[cut:end] {
-			if v.Role == schema.System || v.Extra["unfinished_context_turn"] == true || control(v) {
+			// Control envelopes are snapshots of that turn. A bare confirmation
+			// can only use the immediately preceding exchange. Explicit approvals
+			// and draft buttons use their persisted IDs and payloads.
+			if v.Role == schema.System || v.Extra["unfinished_context_turn"] == true ||
+				((!historical || end == len(part)) && control(v)) {
 				pinned = true
 				break
 			}
@@ -422,7 +426,8 @@ func (m *windowModel) compact(ctx context.Context, part []*schema.Message, offse
 
 	u.Status = "compacting"
 	m.observe(ctx, *u)
-	next, e := m.summarize(ctx, *previous, part[*offset:cut], budget, out, opts)
+	priorNotes, priorRefs := splitResultReferences(*previous)
+	next, e := m.summarize(ctx, priorNotes, part[*offset:cut], budget, out, opts)
 	mode := "summary"
 	if e != nil {
 		// A live tool step has no durable replay cursor. Only fall back for
@@ -432,7 +437,7 @@ func (m *windowModel) compact(ctx context.Context, part []*schema.Message, offse
 			return e
 		}
 		var ok bool
-		next, ok = archivedExcerpts(*previous, part[*offset:cut], min(8192, budget/3))
+		next, ok = archivedExcerpts(priorNotes, part[*offset:cut], min(8192, budget/3))
 		if !ok {
 			return e
 		}
@@ -443,7 +448,7 @@ func (m *windowModel) compact(ctx context.Context, part []*schema.Message, offse
 		}
 		slog.WarnContext(ctx, "using archived excerpts for context compaction", "model", w.Model, "reason", reason)
 	}
-	next = withResultReferences(next, part[*offset:cut])
+	next = withResultReferences(next, priorRefs, part[*offset:cut])
 	freed := 0
 	for _, v := range part[*offset:cut] {
 		freed += count(savedView(v))

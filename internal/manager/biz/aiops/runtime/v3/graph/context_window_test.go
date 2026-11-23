@@ -283,3 +283,79 @@ func TestArchivedExcerptsRequireSuccessfulCheckpoint(t *testing.T) {
 		t.Fatalf("lost history on failed save: %+v, err=%v, saves=%d", usage, err, saves)
 	}
 }
+
+func TestHistoricalDraftDoesNotPinLaterExchanges(t *testing.T) {
+	draft := schema.ToolMessage(`{"kind":"config_draft","draft_hash":"sha256:pending"}`, "draft")
+	call := schema.AssistantMessage("", []schema.ToolCall{{ID: "draft", Function: schema.FunctionCall{Name: "draft_config_change"}}})
+	request := schema.UserMessage(strings.Repeat("巡检", 85000))
+	for _, tc := range []struct {
+		name       string
+		following  []*schema.Message
+		wantPinned bool
+	}{
+		{"awaiting next confirmation", nil, true},
+		{"user cancelled", []*schema.Message{schema.UserMessage("取消草案"), schema.AssistantMessage("已取消。", nil)}, false},
+		{"apply completed", []*schema.Message{schema.UserMessage("确认创建"), schema.AssistantMessage("配置已应用。", nil)}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := newScriptedChatModel(schema.AssistantMessage("The draft was discussed.", nil), schema.AssistantMessage("The draft was discussed.", nil))
+			w := &ContextWindow{Selected: 256000, Capability: llm.WindowCapability{Total: 256000}}
+			m := windowModel{inner: raw, raw: raw, window: w}
+			in := []*schema.Message{request, call, draft}
+			in = append(in, tc.following...)
+			_, _, u, err := m.prepare(t.Context(), append(in, currentContextMessage()), nil)
+			if tc.wantPinned {
+				if err == nil || w.historyCut != 0 || u.Status != "over_limit" {
+					t.Fatal(u, err)
+				}
+			} else if err != nil || w.historyCut < 3 || u.Status != "compacted" {
+				t.Fatal(u, err)
+			}
+		})
+	}
+}
+
+func TestRepeatedCheckpointsKeepFirstToolReference(t *testing.T) {
+	const original = "0958a974-44f8-4e1d-99cf-e1c060ddebba"
+	previous := ""
+	for cycle := 0; cycle < 18; cycle++ {
+		raw := newScriptedChatModel(schema.AssistantMessage("The inventory was checked.", nil))
+		if cycle > 1 {
+			raw.st.genErr = llm.ErrIncompleteResponse
+		}
+		saved := ""
+		w := &ContextWindow{Capability: llm.WindowCapability{Total: 256000}, Summary: previous, Save: func(_ context.Context, _ string, notes string, _ aiops.ContextCompaction) error {
+			saved = notes
+			return nil
+		}}
+		m := windowModel{inner: raw, raw: raw, window: w}
+		user := schema.UserMessage(strings.Repeat("巡检", 66000))
+		user.Extra = map[string]any{"context_row": fmt.Sprintf("0ac81d0d-f936-42c8-b9d2-%012d", cycle)}
+		in := []*schema.Message{user}
+		if cycle == 0 {
+			call := schema.AssistantMessage("", []schema.ToolCall{{ID: "a", Function: schema.FunctionCall{Name: "query_devices"}}})
+			result := schema.ToolMessage("inventory", "a", schema.WithToolName("query_devices"))
+			result.Extra = map[string]any{"result_id": original}
+			in = append(in, call, result)
+		}
+		_, _, u, err := m.prepare(t.Context(), append(in, currentContextMessage()), nil)
+		if err != nil || u.Status != "compacted" || !strings.Contains(saved, "query_devices: "+original) || u.LastCompaction == nil {
+			t.Fatalf("cycle %d: result reference lost or unsaved: %+v %v", cycle, u, err)
+		}
+		if cycle > 1 && (u.LastCompaction.Mode != "excerpt" || !strings.Contains(saved, user.Extra["context_row"].(string))) {
+			t.Fatalf("cycle %d: missing fallback or latest pointer", cycle)
+		}
+		previous = saved
+	}
+}
+
+func TestResultIndexDoesNotConsumeLegacyProse(t *testing.T) {
+	legacy := "Saved handoff" + resultReferenceHeader + "The primary dashboard is unavailable. Check again at 19:00."
+	const id = "0958a974-44f8-4e1d-99cf-e1c060ddebba"
+	for _, input := range []string{legacy, legacy + resultReferenceHeader + "query_devices: " + id} {
+		notes, refs := splitResultReferences(input)
+		if notes != legacy || (input == legacy) != (refs == "") {
+			t.Fatal(notes, refs)
+		}
+	}
+}

@@ -19,19 +19,13 @@ func (r *SessionRepo) ReadArchivedChat(ctx context.Context, sessionID string, us
 	if (id == "" && strings.TrimSpace(term) == "") || offset < 0 || offset > 100_000_000 || utf8.RuneCountInString(term) > 128 || (offset > 0 && id == "") {
 		return nil, fmt.Errorf("supply a message_id or a literal search term; pagination requires a message_id")
 	}
-	db := r.db.WithContext(ctx)
-	var session model.Session
-	if err := db.Select("context_checkpoint").Where("id = ? AND user_id = ?", sessionID, userID).Take(&session).Error; err != nil {
-		return nil, err
-	}
+	tx, err := r.archivedMessages(ctx, sessionID, userID)
 	result := []model.ArchivedChatPassage{}
-	cp := session.ContextCheckpoint
-	if cp == nil {
-		return result, nil
+	if err != nil || tx == nil {
+		return result, err
 	}
-	tx := db.Model(&model.Message{}).
-		Where("session_id = ? AND role IN ? AND content IS NOT NULL", sessionID, []string{"user", "assistant"}).
-		Where("(created_at < ? OR (created_at = ? AND id < ?))", cp.FromTime, cp.FromTime, cp.FromID)
+	db := r.db.WithContext(ctx)
+	tx = tx.Where("role IN ? AND content IS NOT NULL", []string{"user", "assistant"})
 	if id != "" {
 		tx = tx.Where("id = ?", id)
 	}
@@ -57,6 +51,44 @@ func (r *SessionRepo) ReadArchivedChat(ctx context.Context, sessionID string, us
 		}
 	}
 	return result, nil
+}
+
+func (r *SessionRepo) archivedMessages(ctx context.Context, sessionID string, userID uint64) (*gorm.DB, error) {
+	db := r.db.WithContext(ctx)
+	var session model.Session
+	if err := db.Select("context_checkpoint").Where("id = ? AND user_id = ?", sessionID, userID).Take(&session).Error; err != nil {
+		return nil, err
+	}
+	cp := session.ContextCheckpoint
+	if cp == nil {
+		return nil, nil
+	}
+	return db.Model(&model.Message{}).Where("session_id = ? AND (created_at < ? OR (created_at = ? AND id < ?))", sessionID, cp.FromTime, cp.FromTime, cp.FromID), nil
+}
+
+// Page oldest first so expanding the archive does not shift existing pages.
+func (r *SessionRepo) ArchivedToolResults(ctx context.Context, sessionID string, userID uint64, name string, offset int) (model.ArchivedToolPage, error) {
+	const pageSize = 16
+	page := model.ArchivedToolPage{Results: []model.ArchivedToolReference{}}
+	if offset < 0 || offset > 100_000_000 {
+		return page, fmt.Errorf("invalid result offset")
+	}
+	tx, err := r.archivedMessages(ctx, sessionID, userID)
+	if err != nil || tx == nil {
+		return page, err
+	}
+	tx = tx.Select("result_id, tool_name, created_at").Where("role = ? AND result_id IS NOT NULL", model.RoleTool)
+	if name != "" {
+		tx = tx.Where("tool_name = ?", name)
+	}
+	if err := tx.Order("created_at ASC, id ASC").Offset(offset).Limit(pageSize + 1).Scan(&page.Results).Error; err != nil {
+		return page, err
+	}
+	if len(page.Results) > pageSize {
+		page.Results = page.Results[:pageSize]
+		page.Next = offset + pageSize
+	}
+	return page, nil
 }
 
 // ContextHistory hydrates SQL associations in bounded batches and loads only
