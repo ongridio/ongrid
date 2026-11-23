@@ -20,6 +20,17 @@ async function openUsage() {
   return { user, panel: within(screen.getByRole('dialog', { name: 'Context usage' })) };
 }
 
+it('distinguishes durable summaries, excerpts and a later deferred attempt', async () => {
+  const saved = { mode: 'summary' as const, saved_at: '2026-11-23T06:00:00Z', before: 210000, after: 87000 };
+  const { rerender } = render(<ContextUsageIndicator capability={capability} selected={selected} usage={{ ...usage, last_compaction: saved }} />);
+  const { panel } = await openUsage();
+  expect(panel.getByText('Summary saved')).toBeVisible();
+  expect(panel.getByText(/210K → 87K/)).toBeVisible();
+  rerender(<ContextUsageIndicator capability={capability} selected={selected} usage={{ ...usage, status: 'deferred', last_compaction: { ...saved, mode: 'excerpt' } }} />);
+  expect(panel.getByText('Compaction deferred. Using the previous context.')).toBeVisible();
+  expect(panel.getByText('Excerpt saved. Original messages are available.')).toBeVisible();
+});
+
 it('charts the same input budget for the ring, total and categories, and shows compact token details', async () => {
   const pick = vi.fn();
   render(<ContextUsageIndicator capability={capability} selected={selected} usage={{ ...usage, before: 76000, after: 4120 }} onPick={pick} />);

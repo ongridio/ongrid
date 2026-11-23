@@ -5,9 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
+	"math/rand/v2"
+	"net"
 	"regexp"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 	"unicode/utf8"
 
@@ -15,6 +20,7 @@ import (
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
+	openai "github.com/sashabaranov/go-openai"
 
 	"github.com/ongridio/ongrid/internal/pkg/llm"
 )
@@ -28,6 +34,72 @@ const summaryInstruction = "Update the investigation handoff from the quoted con
 var evidenceUUID = regexp.MustCompile(`(?i)\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b`)
 
 var errInvalidSummary = errors.New("invalid context summary")
+
+var handoffDetail = regexp.MustCompile(`(?i)例外|例外项|修订|更正|排除|未授权|未批准|不得|禁止|凭据|交接码|\b(exception|exclude[ds]?|supersedes|correction|unapproved|must not|pending approval)\b`)
+
+func excerptText(content string, width int) string {
+	runes := []rune(content)
+	if len(runes) <= width {
+		return content
+	}
+	edge := width / 4
+	inner := runes[edge : len(runes)-edge]
+	room := width - 2*edge
+	at := (len(inner) - room) / 2
+	text := string(inner)
+	if hit := handoffDetail.FindStringIndex(text); hit != nil {
+		at = min(len(inner)-room, max(0, utf8.RuneCountInString(text[:hit[0]])-room/4))
+	}
+	return string(runes[:edge]) + " […] " + string(inner[at:at+room]) + " […] " + string(runes[len(runes)-edge:])
+}
+
+// Keep upstream response bodies and endpoint URLs out of logs.
+func transientSummaryError(err error) string {
+	var api *openai.APIError
+	if errors.As(err, &api) {
+		switch api.HTTPStatusCode {
+		case 408, 502, 503, 504:
+			return fmt.Sprintf("upstream_%d", api.HTTPStatusCode)
+		}
+	}
+	var network net.Error
+	switch {
+	case errors.As(err, &network) && network.Timeout():
+		return "timeout"
+	case errors.Is(err, io.ErrUnexpectedEOF), errors.Is(err, io.EOF), errors.Is(err, syscall.ECONNRESET), errors.Is(err, syscall.EPIPE):
+		return "connection_interrupted"
+	case err != nil && strings.Contains(err.Error(), "tls: bad record MAC"):
+		return "tls_record"
+	}
+	return ""
+}
+
+// The summary has no executable tools. Retry only this fragment inside one deadline.
+func (m *windowModel) generateSummary(ctx context.Context, messages []*schema.Message, opts []model.Option) (*schema.Message, error) {
+	ctx, cancel := context.WithTimeout(ctx, 105*time.Second)
+	defer cancel()
+	for attempt := 1; ; attempt++ {
+		callCtx, stop := context.WithTimeout(ctx, 90*time.Second)
+		reply, err := m.raw.Generate(callCtx, messages, opts...)
+		stop()
+		if err == nil || ctx.Err() != nil {
+			return reply, err
+		}
+		reason := transientSummaryError(err)
+		if reason == "" {
+			return nil, err
+		}
+		slog.WarnContext(ctx, "context summary request failed", "session_id", m.window.SessionID, "revision", m.window.Revision, "model", m.window.Model, "attempt", attempt, "reason", reason)
+		if attempt == 2 {
+			return nil, fmt.Errorf("%w: %s after retry", errInvalidSummary, reason)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(200*time.Millisecond + rand.N(200*time.Millisecond)):
+		}
+	}
+}
 
 // Keep all saved tool results in the covered turns addressable, including
 // small inline results whose JSON does not itself contain a result ID.
@@ -75,10 +147,7 @@ func archivedExcerpts(previous string, messages []*schema.Message, limit int) (s
 		if content == "" {
 			continue
 		}
-		runes := []rune(content)
-		if len(runes) > width {
-			content = string(runes[:width/2]) + " […] " + string(runes[len(runes)-width/2:])
-		}
+		content = excerptText(content, width)
 		fmt.Fprintf(&notes, "\n%s %s %q", msg.Role, msg.ToolName, content)
 	}
 	return notes.String(), llm.EstimateText(notes.String()) <= limit
@@ -106,12 +175,9 @@ func (m *windowModel) summarize(ctx context.Context, previous string, part []*sc
 		}
 		// Reasoning and visible notes share the provider's completion allowance.
 		options := append(slices.Clone(opts), model.WithToolChoice(schema.ToolChoiceForbidden), model.WithTools([]*schema.ToolInfo{}), model.WithMaxTokens(out), llm.WithReasoningEffort(""))
-		callCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
-		reply, e := m.raw.Generate(callCtx, messages, options...)
-		timedOut := callCtx.Err() == context.DeadlineExceeded && ctx.Err() == nil
-		cancel()
+		reply, e := m.generateSummary(ctx, messages, options)
 		if e != nil {
-			if timedOut {
+			if errors.Is(e, context.DeadlineExceeded) && ctx.Err() == nil {
 				return fmt.Errorf("%w: generation timed out", errInvalidSummary)
 			}
 			return e

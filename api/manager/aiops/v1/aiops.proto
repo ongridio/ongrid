@@ -103,6 +103,14 @@ message ContextUsage {
     uint32 before = 12;
     uint32 output_reserve = 13 [json_name = "output_reserve"];
     uint32 after = 14;
+    ContextCompaction last_compaction = 15 [json_name = "last_compaction"];
+}
+
+message ContextCompaction {
+    string mode = 1;
+    google.protobuf.Timestamp saved_at = 2 [json_name = "saved_at"];
+    uint32 before = 3;
+    uint32 after = 4;
 }
 
 // ToolCall 一次 LLM 发起的工具调用（OpenAI tool_calls 的投影）。

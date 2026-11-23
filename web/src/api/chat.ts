@@ -55,6 +55,7 @@ export type ContextUsage = {
   provider: string; model: string; window: number; input_budget: number; estimated: number;
   known: boolean; output_reserve: number; reported?: number; tools: number; instructions: number; tool_results: number;
   status: 'ready' | 'compacting' | 'compacted' | 'deferred' | 'over_limit'; before?: number; after?: number;
+  last_compaction?: { mode: 'summary' | 'excerpt'; saved_at: string; before: number; after: number };
 };
 
 export function getSessionContext(id: string, signal?: AbortSignal) {

@@ -29,7 +29,8 @@ export function ContextUsageIndicator({ capability, selected, usage, disabled, o
   const label = tr('上下文用量', 'Context usage');
   const state = current?.status === 'compacting' ? tr('正在整理上下文', 'Compacting context')
     : current?.status === 'over_limit' ? tr('超出可用窗口', 'Input exceeds window')
-    : current?.status === 'deferred' ? tr('已保留上次有效上下文', 'Previous context retained') : '';
+    : current?.status === 'deferred' ? tr('整理延期', 'Compaction deferred') : '';
+  const saved = current?.last_compaction;
   const hint = [label, ratio !== undefined && percent.format(ratio), state].filter(Boolean).join(' · ');
   const categories = current ? [
     { label: tr('系统指令', 'System instructions'), tokens: current.instructions, color: 'bg-indigo-500' },
@@ -82,6 +83,13 @@ export function ContextUsageIndicator({ capability, selected, usage, disabled, o
       </> : <p className="my-3 text-text-muted">{tr('发送消息后显示用量。', 'Send a message to see usage.')}</p>}
 
       {!capability.source && <p className="my-2 text-xs text-text-muted">{tr(`未获取到模型上限，默认使用 ${windowLabel(capability.auto)} 窗口。`, `Model capacity is unknown. Using the default ${windowLabel(capability.auto)} window.`)}</p>}
+      {current?.status === 'deferred' && <p role="status" className="mb-2 text-xs text-text-muted">{tr('本次整理延期，沿用上次上下文。', 'Compaction deferred. Using the previous context.')}</p>}
+      {saved && <div className="mb-3 text-xs text-text-muted">
+        <p>{saved.mode === 'excerpt' ? tr('已保存精简摘录，可回查原文', 'Excerpt saved. Original messages are available.')
+          : tr('摘要已保存', 'Summary saved')}</p>
+        <p className="mt-1 tabular-nums"><time dateTime={saved.saved_at}>{new Date(saved.saved_at).toLocaleString(locale)}</time>
+          {' · '}{compact.format(saved.before)} → {compact.format(saved.after)}</p>
+      </div>}
       <div className="flex items-center justify-between gap-2 border-t border-border-soft pt-2">
         <span className="text-xs text-text-muted">{tr('上下文窗口', 'Context window')}</span>
         <Select label={tr('上下文窗口', 'Context window')} variant="inline" className="max-w-full"
@@ -99,7 +107,7 @@ export function ContextUsageIndicator({ capability, selected, usage, disabled, o
             ...(budget ? categories.map(c => [c.label, compact.format(c.tokens)]) : []),
             [tr('输出预留', 'Output reserve'), compact.format(current.output_reserve)],
             ...(current.reported ? [[tr('上次实测输入', 'Last reported input'), compact.format(current.reported)]] : []),
-            ...(current.before ? [[tr('最近一次自动压缩', 'Last compaction'), current.after ? `${compact.format(current.before)} → ${compact.format(current.after)}` : compact.format(current.before)]] : []),
+            ...(!saved && current.before ? [[tr('最近一次自动压缩', 'Last compaction'), current.after ? `${compact.format(current.before)} → ${compact.format(current.after)}` : compact.format(current.before)]] : []),
           ].map(([key, value]) => <div key={key} className="flex justify-between gap-2"><dt>{key}</dt><dd>{value}</dd></div>)}
         </dl>
         <p>{tr('预计输入达到可用输入的 80% 时自动整理。', 'Context is compacted automatically at 80% of the available input budget.')}</p>

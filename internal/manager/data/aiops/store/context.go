@@ -5,11 +5,59 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
+	"unicode/utf8"
 
 	"gorm.io/gorm"
 
 	model "github.com/ongridio/ongrid/internal/manager/model/aiops"
 )
+
+// ReadArchivedChat returns at most three passages from visible conversation text.
+// Read the committed boundary on each call so the tool also works in the turn that saved it.
+func (r *SessionRepo) ReadArchivedChat(ctx context.Context, sessionID string, userID uint64, id, term string, offset int) ([]model.ArchivedChatPassage, error) {
+	if (id == "" && strings.TrimSpace(term) == "") || offset < 0 || offset > 100_000_000 || utf8.RuneCountInString(term) > 128 || (offset > 0 && id == "") {
+		return nil, fmt.Errorf("supply a message_id or a literal search term; pagination requires a message_id")
+	}
+	db := r.db.WithContext(ctx)
+	var session model.Session
+	if err := db.Select("context_checkpoint").Where("id = ? AND user_id = ?", sessionID, userID).Take(&session).Error; err != nil {
+		return nil, err
+	}
+	result := []model.ArchivedChatPassage{}
+	cp := session.ContextCheckpoint
+	if cp == nil {
+		return result, nil
+	}
+	tx := db.Model(&model.Message{}).
+		Where("session_id = ? AND role IN ? AND content IS NOT NULL", sessionID, []string{"user", "assistant"}).
+		Where("(created_at < ? OR (created_at = ? AND id < ?))", cp.FromTime, cp.FromTime, cp.FromID)
+	if id != "" {
+		tx = tx.Where("id = ?", id)
+	}
+	// INSTR and SUBSTR use character positions on both SQLite and MySQL.
+	if term != "" {
+		tx = tx.Where("INSTR(content, ?) > 0", term)
+	}
+	if term != "" && offset == 0 {
+		tx = tx.Select("id, role, content, CASE WHEN INSTR(content, ?) > 100 THEN INSTR(content, ?) - 101 ELSE 0 END AS passage_start", term, term)
+	} else {
+		tx = tx.Select("id, role, content, ? AS passage_start", offset)
+	}
+	source := tx.Order("created_at DESC, id DESC").Limit(3)
+	if err := db.Table("(?) AS hits", source).Select("id, role, passage_start AS start, SUBSTR(content, passage_start + 1, 901) AS text").Scan(&result).Error; err != nil {
+		return nil, err
+	}
+	for i := range result {
+		p := &result[i]
+		chars := []rune(p.Text)
+		if len(chars) > 900 {
+			p.Text = string(chars[:900])
+			p.Next = p.Start + 900
+		}
+	}
+	return result, nil
+}
 
 // ContextHistory hydrates SQL associations in bounded batches and loads only
 // the newest historical images that fit beside the current turn.

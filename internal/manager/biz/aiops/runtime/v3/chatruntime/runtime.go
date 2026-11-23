@@ -480,6 +480,9 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (result *Reply, ret
 	// to the global default with a log line — never crash a session.
 	basePrompt := rt.cfg.BasePrompt
 	runtimeToolBag := basetool.FilterWebSearch(ctx, rt.toolBagSnapshot())
+	if reader, ok := rt.cfg.Sessions.(archivedChatReader); ok {
+		runtimeToolBag = append(runtimeToolBag, basetool.WithValidation(archivedChatTool{reader, sess.ID, sess.UserID}))
+	}
 	if skillLoader != nil {
 		runtimeToolBag = append(runtimeToolBag, skillLoader)
 	}
@@ -575,6 +578,8 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (result *Reply, ret
 	//    is a future optimisation).
 	graphCfg := rt.cfg.GraphCfg
 	graphCfg.Context = rt.contextWindow(ctx, req.Provider, req.Model)
+	graphCfg.Context.SessionID = sess.ID
+	graphCfg.Context.Revision = sess.ContextRevision
 	if (sess.Provider == nil || *sess.Provider == graphCfg.Context.Provider) && (sess.Model == nil || *sess.Model == graphCfg.Context.Model) {
 		graphCfg.Context.Selected = sess.ContextWindow
 	}
@@ -585,16 +590,17 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (result *Reply, ret
 	}
 	if sess.ContextCheckpoint != nil {
 		graphCfg.Context.Summary = sess.ContextCheckpoint.Summary
+		graphCfg.Context.LastCompaction = sess.ContextCheckpoint.LastCompaction
 	}
 	if store != nil {
 		revision := sess.ContextRevision
-		graphCfg.Context.Save = func(ctx context.Context, id, summary string) error {
+		graphCfg.Context.Save = func(ctx context.Context, id, summary string, saved aiopsmodel.ContextCompaction) error {
 			if id == "" {
 				id = userMsg.ID
 			}
 			for _, row := range history {
 				if row.ID == id {
-					ok, err := store.SaveContextCheckpoint(ctx, sess.ID, userMsg.ID, revision, aiopsmodel.ContextCheckpoint{FromID: id, FromTime: row.CreatedAt, Summary: summary})
+					ok, err := store.SaveContextCheckpoint(ctx, sess.ID, userMsg.ID, revision, aiopsmodel.ContextCheckpoint{FromID: id, FromTime: row.CreatedAt, Summary: summary, LastCompaction: &saved})
 					if err != nil {
 						return err
 					}

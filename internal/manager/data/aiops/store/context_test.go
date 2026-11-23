@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,6 +12,49 @@ import (
 func TestContextCursorAndTurnIsolation(t *testing.T) {
 	for _, dialect := range []string{"sqlite", "mysql"} {
 		t.Run(dialect, func(t *testing.T) { testContextCursor(t, newReasoningTestRepo(t, dialect)) })
+	}
+}
+
+func TestReadArchivedChatPassages(t *testing.T) {
+	ctx := context.Background()
+	for _, dialect := range []string{"sqlite", "mysql"} {
+		t.Run(dialect, func(t *testing.T) {
+			r := newReasoningTestRepo(t, dialect)
+			s := &model.Session{UserID: 7, Title: "archived"}
+			if err := r.CreateSession(ctx, s); err != nil {
+				t.Fatal(err)
+			}
+			body := strings.Repeat("旧", 1800) + "机架例外 QT-82" + strings.Repeat("旧", 1000)
+			now := time.Now().UTC().Truncate(time.Second)
+			msg := &model.Message{SessionID: s.ID, Role: model.RoleUser, Content: &body, CreatedAt: now}
+			bound := &model.Message{SessionID: s.ID, Role: model.RoleUser, Content: &body, CreatedAt: now.Add(time.Second)}
+			for _, m := range []*model.Message{msg, bound} {
+				if e := r.AppendMessage(ctx, m); e != nil {
+					t.Fatal(e)
+				}
+			}
+			if e := r.BeginContextTurn(ctx, s.ID, bound.ID); e != nil {
+				t.Fatal(e)
+			}
+			ok, e := r.SaveContextCheckpoint(ctx, s.ID, bound.ID, 0, model.ContextCheckpoint{Summary: "earlier exchange", FromID: bound.ID, FromTime: bound.CreatedAt})
+			if !ok || e != nil {
+				t.Fatal(ok, e)
+			}
+			hits, e := r.ReadArchivedChat(ctx, s.ID, 7, "", "机架例外", 0)
+			if e != nil || len(hits) != 1 || hits[0].ID != msg.ID || hits[0].Start != 1700 || hits[0].Next != 2600 || !strings.Contains(hits[0].Text, "QT-82") {
+				t.Fatal(hits, e)
+			}
+			hits, e = r.ReadArchivedChat(ctx, s.ID, 7, msg.ID, "", 2600)
+			if e != nil || len(hits) != 1 || hits[0].Next != 0 || hits[0].Start != 2600 {
+				t.Fatal(hits, e)
+			}
+			if _, e = r.ReadArchivedChat(ctx, s.ID, 8, msg.ID, "", 0); e == nil {
+				t.Fatal("wrong owner")
+			}
+			if hits, e = r.ReadArchivedChat(ctx, s.ID, 7, bound.ID, "", 0); e != nil || len(hits) != 0 {
+				t.Fatal("retained message returned", e)
+			}
+		})
 	}
 }
 

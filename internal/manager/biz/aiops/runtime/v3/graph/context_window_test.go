@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 
 	model "github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
+	aiops "github.com/ongridio/ongrid/internal/manager/model/aiops"
 	openai "github.com/sashabaranov/go-openai"
 
 	"github.com/ongridio/ongrid/internal/pkg/llm"
@@ -20,11 +22,63 @@ func currentContextMessage() *schema.Message {
 	return m
 }
 
+type interruptedSummary struct {
+	*scriptedChatModel
+	failures int
+	calls    int
+}
+
+func (m *interruptedSummary) Generate(ctx context.Context, messages []*schema.Message, opts ...model.Option) (*schema.Message, error) {
+	m.calls++
+	if m.calls <= m.failures {
+		return nil, fmt.Errorf("transport: %w", io.ErrUnexpectedEOF)
+	}
+	return m.scriptedChatModel.Generate(ctx, messages, opts...)
+}
+
+func TestTransientSummaryRecoveryAt256K(t *testing.T) {
+	for _, failures := range []int{1, 2} {
+		raw := &interruptedSummary{scriptedChatModel: newScriptedChatModel(schema.AssistantMessage("handoff saved", nil)), failures: failures}
+		state := &ContextWindow{Capability: llm.WindowCapability{Total: 256000}}
+		saves := 0
+		state.Save = func(_ context.Context, _ string, notes string, meta aiops.ContextCompaction) error {
+			saves++
+			if failures == 2 && (meta.Mode != "excerpt" || !strings.Contains(notes, "例外 NR-583A")) {
+				t.Fatalf("missing middle exception: %s", notes)
+			}
+			if failures == 1 && meta.Mode != "summary" {
+				t.Fatal(meta)
+			}
+			return nil
+		}
+		msg := schema.UserMessage(strings.Repeat("采样", 33333) + "例外 NR-583A" + strings.Repeat("采样", 33333))
+		msg.Extra = map[string]any{"context_row": "86fa0760-2504-408a-a742-bc53cbd4622f"}
+		m := windowModel{raw: raw, inner: raw, window: state}
+		_, _, u, err := m.prepare(context.Background(), []*schema.Message{msg, currentContextMessage()}, nil)
+		if err != nil || raw.calls != 2 || saves != 1 || u.LastCompaction == nil || u.LastCompaction.After != u.Estimated || u.Status != "compacted" {
+			t.Fatalf("calls=%d saves=%d usage=%+v err=%v", raw.calls, saves, u, err)
+		}
+	}
+}
+
+func TestSummaryRetrySkipsRejectedAndRateLimitedRequests(t *testing.T) {
+	for _, status := range []int{400, 401, 403, 429} {
+		raw := newScriptedChatModel()
+		upstream := &openai.APIError{HTTPStatusCode: status}
+		raw.st.genErr = upstream
+		m := &windowModel{raw: raw, window: &ContextWindow{}}
+		_, err := m.generateSummary(context.Background(), []*schema.Message{schema.UserMessage("handoff")}, nil)
+		if !errors.Is(err, upstream) || raw.st.generateCalls.Load() != 1 {
+			t.Fatalf("HTTP %d: calls=%d err=%v", status, raw.st.generateCalls.Load(), err)
+		}
+	}
+}
+
 func TestContextCompactsOnceAcrossModelSteps(t *testing.T) {
 	raw := newScriptedChatModel(schema.AssistantMessage("User wants to diagnose disk errors.", nil))
 	state := &ContextWindow{Capability: llm.WindowCapability{Total: 6000}}
 	saves := 0
-	state.Save = func(_ context.Context, id, summary string) error {
+	state.Save = func(_ context.Context, id, summary string, _ aiops.ContextCompaction) error {
 		saves++
 		if id == "" || !strings.Contains(summary, "disk") {
 			t.Fatal(id, summary)
@@ -141,7 +195,10 @@ func TestContextRejectionRetriesOnlyBeforeGeneration(t *testing.T) {
 
 func TestRejectedSummaryDoesNotAdvanceCursor(t *testing.T) {
 	raw := newScriptedChatModel(schema.AssistantMessage("invented d533978a-3423-447c-99b0-9b696977ecb2", nil))
-	state := &ContextWindow{Capability: llm.WindowCapability{Total: 4096}, Save: func(context.Context, string, string) error { t.Fatal("invalid summary persisted"); return nil }}
+	state := &ContextWindow{Capability: llm.WindowCapability{Total: 4096}, Save: func(context.Context, string, string, aiops.ContextCompaction) error {
+		t.Fatal("invalid summary persisted")
+		return nil
+	}}
 	m := &windowModel{inner: raw, raw: raw, window: state}
 	in := []*schema.Message{schema.SystemMessage("policy"), schema.UserMessage(strings.Repeat("log ", 2100)), currentContextMessage()}
 	_, _, u, e := m.prepare(context.Background(), in, nil)
@@ -171,7 +228,10 @@ func TestDurableContextCompactionAt256K(t *testing.T) {
 			raw.st.genErr = tc.modelErr
 			state := &ContextWindow{Capability: llm.WindowCapability{Total: 1050000}, Summary: prior}
 			var saved string
-			state.Save = func(_ context.Context, boundary, notes string) error {
+			state.Save = func(_ context.Context, boundary, notes string, meta aiops.ContextCompaction) error {
+				if (meta.Mode == "excerpt") != tc.fallback || meta.Before <= meta.After || meta.SavedAt.IsZero() {
+					t.Fatalf("incorrect saved checkpoint metadata: %+v", meta)
+				}
 				saved = notes
 				return nil
 			}
@@ -212,7 +272,7 @@ func TestArchivedExcerptsRequireSuccessfulCheckpoint(t *testing.T) {
 	raw.st.genErr = llm.ErrIncompleteResponse
 	saves := 0
 	state := &ContextWindow{Capability: llm.WindowCapability{Total: 4096}, Summary: previous}
-	state.Save = func(context.Context, string, string) error {
+	state.Save = func(context.Context, string, string, aiops.ContextCompaction) error {
 		saves++
 		return errors.New("checkpoint superseded")
 	}

@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
@@ -29,7 +30,10 @@ type ContextWindow struct {
 	Capability          llm.WindowCapability
 	Selected            int
 	Summary             string
-	Save                func(context.Context, string, string) error
+	Save                func(context.Context, string, string, aiops.ContextCompaction) error
+	SessionID           string
+	Revision            int64
+	LastCompaction      *aiops.ContextCompaction
 	Observe             func(context.Context, aiops.ContextUsage)
 	Checker             llm.BudgetChecker
 	BudgetUser          uint64
@@ -230,6 +234,7 @@ func (m *windowModel) prepare(ctx context.Context, in []*schema.Message, opts []
 		out = min(out, *common.MaxTokens)
 	}
 	u.OutputReserve = out
+	u.LastCompaction = w.LastCompaction
 	tools := m.tools
 	if common.Tools != nil {
 		tools = common.Tools
@@ -329,6 +334,7 @@ func (m *windowModel) prepare(ctx context.Context, in []*schema.Message, opts []
 			}
 			if err != nil {
 				u.Status = "deferred"
+				slog.WarnContext(ctx, "context compaction deferred", "session_id", w.SessionID, "revision", w.Revision, "model", w.Model, "error_type", fmt.Sprintf("%T", err))
 			} else if w.LastBefore == before {
 				u.Status = "compacted"
 			} else {
@@ -417,6 +423,7 @@ func (m *windowModel) compact(ctx context.Context, part []*schema.Message, offse
 	u.Status = "compacting"
 	m.observe(ctx, *u)
 	next, e := m.summarize(ctx, *previous, part[*offset:cut], budget, out, opts)
+	mode := "summary"
 	if e != nil {
 		// A live tool step has no durable replay cursor. Only fall back for
 		// persisted turns, and only when the model could not finish valid notes.
@@ -429,6 +436,7 @@ func (m *windowModel) compact(ctx context.Context, part []*schema.Message, offse
 		if !ok {
 			return e
 		}
+		mode = "excerpt"
 		reason := "provider returned incomplete"
 		if errors.Is(e, errInvalidSummary) {
 			reason = e.Error() // validation messages contain no transcript content
@@ -448,9 +456,17 @@ func (m *windowModel) compact(ctx context.Context, part []*schema.Message, offse
 		if cut < len(part) {
 			boundary, _ = part[cut].Extra["context_row"].(string)
 		}
-		if e = w.Save(ctx, boundary, next); e != nil {
+		after := before - freed + count(summaryMessage(next))
+		if *previous != "" {
+			after -= count(summaryMessage(*previous))
+		}
+		saved := aiops.ContextCompaction{Mode: mode, SavedAt: time.Now().UTC(), Before: before, After: after}
+		if e = w.Save(ctx, boundary, next, saved); e != nil {
 			return e
 		}
+		w.Revision++
+		w.LastCompaction = &saved
+		u.LastCompaction = &saved
 	}
 	*previous = next
 	*offset = cut
