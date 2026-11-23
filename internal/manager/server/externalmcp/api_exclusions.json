@@ -23,6 +23,7 @@
   {"method":"POST","path":"/v1/auth/register","reason":"Authentication, credential disclosure, and approval decisions stay in the trusted console."},
   {"method":"POST","path":"/v1/chat/sessions/{id}/attachments","reason":"Streaming, multipart, or binary transport; use the console or authenticated download."},
   {"method":"GET","path":"/v1/chat/sessions/{id}/attachments/{attachmentID}","reason":"Streaming, multipart, or binary transport; use the console or authenticated download."},
+  {"method":"GET","path":"/v1/chat/sessions/{id}/context","reason":"The context usage snapshot belongs to the authenticated chat session and is used by the console composer."},
   {"method":"POST","path":"/v1/chat/sessions/{id}/messages/stream","reason":"Streaming, multipart, or binary transport; use the console or authenticated download."},
   {"method":"GET","path":"/v1/devices/{device_id}/shell","reason":"Browser, upload, or temporary access ticket endpoint."},
   {"method":"POST","path":"/v1/devices/{device_id}/shell/tickets","reason":"Browser, upload, or temporary access ticket endpoint."},
