@@ -51,7 +51,21 @@ export type ChatMessage = {
   tool_call?: ToolCallSummary;
 };
 
+export type ContextUsage = {
+  provider: string; model: string; window: number; input_budget: number; estimated: number;
+  known: boolean; output_reserve: number; reported?: number; tools: number; instructions: number; tool_results: number;
+  status: 'ready' | 'compacting' | 'compacted' | 'deferred' | 'over_limit'; before?: number; after?: number;
+  last_compaction?: { mode: 'summary' | 'excerpt'; saved_at: string; before: number; after: number };
+};
+
+export function getSessionContext(id: string, signal?: AbortSignal) {
+  return request<Pick<ChatSession, 'context_usage' | 'context_window_tokens' | 'runtime_version'>>(
+    'GET', `/chat/sessions/${encodeURIComponent(id)}/context`, undefined, { signal });
+}
+
 export type ChatSession = {
+  context_usage?: ContextUsage;
+  context_window_tokens?: number;
   page_context?: AssistantPage;
   runtime_version?: string;
   apm_source?: { trace_id: string; repo_id: string; source_directory: string; revision: string; commit_sha: string; error?: string };
@@ -101,6 +115,7 @@ export function chatReasoningEffort(effort?: string) {
 }
 
 export function createSession(input: {
+  context_window_tokens?: number;
   page_context?: AssistantPage;
   apm_source?: { trace_id: string; service_name: string; service_namespace: string; environment: string; service_version: string; instance_id: string };
   title: string;
@@ -122,8 +137,8 @@ export function renameSession(sessionId: string, title: string) {
   );
 }
 
-export function updateSessionModel(sessionId: string, provider: string, model: string, reasoning_effort = '') {
-  return request<void>('PATCH', `/chat/sessions/${encodeURIComponent(sessionId)}`, { provider, model, reasoning_effort: chatReasoningEffort(reasoning_effort) });
+export function updateSessionModel(sessionId: string, provider: string, model: string, reasoning_effort = '', context_window_tokens?: number) {
+  return request<void>('PATCH', `/chat/sessions/${encodeURIComponent(sessionId)}`, { provider, model, reasoning_effort: chatReasoningEffort(reasoning_effort), context_window_tokens });
 }
 
 // stopSession interrupts the session's in-flight turn server-side (the SPA
@@ -206,7 +221,10 @@ export type SendOptions = {
   locale?: string;
 };
 
-export function postMessage(sessionId: string | number, content: string, opts: SendOptions = {}) {
+// Match the Manager's maxMessageBodyBytes, including JSON escaping and options.
+export const MAX_CHAT_BODY_BYTES = 1024 * 1024;
+
+export function chatMessageBody(content: string, opts: SendOptions) {
   const body: Record<string, unknown> = { content };
   if (opts.provider) body.provider = opts.provider;
   if (opts.model) body.model = opts.model;
@@ -215,6 +233,11 @@ export function postMessage(sessionId: string | number, content: string, opts: S
   if (opts.webSearchEnabled) body.web_search_enabled = true;
   if (opts.locale) body.locale = opts.locale;
   if (opts.attachmentIds && opts.attachmentIds.length > 0) body.attachment_ids = opts.attachmentIds;
+  return body;
+}
+
+export function postMessage(sessionId: string | number, content: string, opts: SendOptions = {}) {
+  const body = chatMessageBody(content, opts);
   return request<PostMessageResponse>(
     'POST',
     `/chat/sessions/${encodeURIComponent(String(sessionId))}/messages`,
@@ -240,7 +263,10 @@ export type ReasoningCapability = {
   default_level?: string;
 };
 
+export type WindowCapability = { total?: number; input?: number; output?: number; source?: string; auto: number; options?: number[] | null };
+
 export type LLMProvider = {
+  context_windows?: Record<string, WindowCapability>;
   reasoning_capabilities?: Record<string, ReasoningCapability>;
   reasoning_efforts?: Record<string, string[]>;
   id: string;
@@ -250,11 +276,13 @@ export type LLMProvider = {
   reasoning_effort?: string;
 };
 
-export type ModelSelection = { provider: string; model: string; reasoning_effort?: string };
+export type ModelSelection = { provider: string; model: string; reasoning_effort?: string; context_window_tokens?: number };
 
 export function modelSelectionForCatalog(selection: ModelSelection | null, providers: LLMProvider[]): ModelSelection | null {
   if (!selection) return null;
-  const provider = providers.find(item => item.id === selection.provider);
+  const { provider: providerID } = selection;
+  const provider = providers.find(item => item.id === providerID);
+  if (selection.context_window_tokens && !provider?.context_windows?.[selection.model]?.options?.includes(selection.context_window_tokens)) selection = { ...selection, context_window_tokens: 0 };
   const levels = provider?.reasoning_capabilities?.[selection.model]?.levels ?? provider?.reasoning_efforts?.[selection.model];
   const effort = chatReasoningEffort(selection.reasoning_effort);
   if (effort && levels && !levels.includes(effort)) return { ...selection, reasoning_effort: '' };
@@ -263,6 +291,7 @@ export function modelSelectionForCatalog(selection: ModelSelection | null, provi
 
 
 export type ModelCatalog = {
+  runtime_version?: string;
   providers: LLMProvider[];
   default: ModelSelection;
 };
@@ -325,6 +354,7 @@ export type ApprovalPendingStreamEvent = {
 export class RejectedChatTurnError extends ApiError {}
 
 export type StreamCallbacks = {
+  onContextUsage?: (usage: ContextUsage) => void;
   onAssistant?: (e: AssistantStreamEvent) => void;
   onToolStart?: (e: ToolStreamEvent) => void;
   onToolEnd?: (e: ToolStreamEvent) => void;
@@ -354,19 +384,10 @@ export async function streamMessage(
   const token = getToken();
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
-  const body: Record<string, unknown> = { content };
-  if (opts.provider) body.provider = opts.provider;
-  if (opts.model) body.model = opts.model;
-  if (opts.reasoning_effort !== undefined) body.reasoning_effort = chatReasoningEffort(opts.reasoning_effort);
-  if (opts.mentions && opts.mentions.length > 0) body.mentions = opts.mentions;
-  if (opts.webSearchEnabled) body.web_search_enabled = true;
-  if (opts.locale) body.locale = opts.locale;
-  if (opts.attachmentIds && opts.attachmentIds.length > 0) body.attachment_ids = opts.attachmentIds;
-
   const res = await fetch(url, {
     method: 'POST',
     headers,
-    body: JSON.stringify(body),
+    body: JSON.stringify(chatMessageBody(content, opts)),
     signal,
   });
 
@@ -424,6 +445,9 @@ function dispatchFrame(raw: string, cbs: StreamCallbacks) {
     return;
   }
   switch (event) {
+    case 'context_usage':
+      cbs.onContextUsage?.(payload as ContextUsage);
+      break;
     case 'assistant':
       cbs.onAssistant?.(payload as AssistantStreamEvent);
       break;

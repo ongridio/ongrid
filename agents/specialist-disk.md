@@ -20,6 +20,8 @@ capabilities:
     max_tool_calls: 10
 can_delegate: true
 tools:
+  - read_archived_chat
+  - read_tool_result
   - query_knowledge
   - host_find_large_files
   - host_du_summary

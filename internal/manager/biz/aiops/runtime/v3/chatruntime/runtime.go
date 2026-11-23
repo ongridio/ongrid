@@ -97,9 +97,7 @@ type Config struct {
 	// system prompt. Empty = none.
 	BasePrompt string
 
-	// HistoryLimit caps how many past messages we replay. 0 → 50
-	// (legacy default).
-	HistoryLimit int
+	ResolveWindow func(context.Context, string, string) (string, string, llm.WindowCapability)
 
 	// GraphCfg tunes the graph engine (max iterations, temperature,
 	// per-tool timeout).
@@ -192,9 +190,6 @@ func NewRuntime(cfg Config) (*Runtime, error) {
 	}
 	if cfg.ChatModel == nil {
 		return nil, errors.New("chatruntime: ChatModel is required")
-	}
-	if cfg.HistoryLimit <= 0 {
-		cfg.HistoryLimit = 50
 	}
 	log := cfg.Logger
 	if log == nil {
@@ -421,7 +416,16 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (result *Reply, ret
 	}
 
 	// 4. Load history (includes the just-appended user message).
-	history, err := rt.cfg.Sessions.ListMessages(ctx, sess.ID, rt.cfg.HistoryLimit)
+	var history []*aiopsmodel.Message
+	store, _ := rt.cfg.Sessions.(contextStore)
+	if store != nil {
+		if err := store.BeginContextTurn(ctx, sess.ID, userMsg.ID); err != nil {
+			return nil, err
+		}
+		history, err = store.ContextHistory(ctx, sess, userMsg)
+	} else {
+		history, err = rt.cfg.Sessions.ListMessages(ctx, sess.ID, 0)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("chatruntime: load history: %w", err)
 	}
@@ -476,6 +480,9 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (result *Reply, ret
 	// to the global default with a log line — never crash a session.
 	basePrompt := rt.cfg.BasePrompt
 	runtimeToolBag := basetool.FilterWebSearch(ctx, rt.toolBagSnapshot())
+	if reader, ok := rt.cfg.Sessions.(archivedChatReader); ok {
+		runtimeToolBag = append(runtimeToolBag, basetool.WithValidation(archivedChatTool{reader, sess.ID, sess.UserID}))
+	}
 	if skillLoader != nil {
 		runtimeToolBag = append(runtimeToolBag, skillLoader)
 	}
@@ -570,6 +577,51 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (result *Reply, ret
 	//    today; an in-memory cache keyed on (toolBag identity, cfg)
 	//    is a future optimisation).
 	graphCfg := rt.cfg.GraphCfg
+	graphCfg.Context = rt.contextWindow(ctx, req.Provider, req.Model)
+	graphCfg.Context.SessionID = sess.ID
+	graphCfg.Context.Revision = sess.ContextRevision
+	if (sess.Provider == nil || *sess.Provider == graphCfg.Context.Provider) && (sess.Model == nil || *sess.Model == graphCfg.Context.Model) {
+		graphCfg.Context.Selected = sess.ContextWindow
+	}
+	if prev := sess.ContextUsage; prev != nil && prev.Provider == graphCfg.Context.Provider && prev.Model == graphCfg.Context.Model {
+		graphCfg.Context.Reported = prev.Reported
+		graphCfg.Context.LastBefore = prev.Before
+		graphCfg.Context.LastAfter = prev.After
+	}
+	if sess.ContextCheckpoint != nil {
+		graphCfg.Context.Summary = sess.ContextCheckpoint.Summary
+		graphCfg.Context.LastCompaction = sess.ContextCheckpoint.LastCompaction
+	}
+	if store != nil {
+		revision := sess.ContextRevision
+		graphCfg.Context.Save = func(ctx context.Context, id, summary string, saved aiopsmodel.ContextCompaction) error {
+			if id == "" {
+				id = userMsg.ID
+			}
+			for _, row := range history {
+				if row.ID == id {
+					ok, err := store.SaveContextCheckpoint(ctx, sess.ID, userMsg.ID, revision, aiopsmodel.ContextCheckpoint{FromID: id, FromTime: row.CreatedAt, Summary: summary, LastCompaction: &saved})
+					if err != nil {
+						return err
+					}
+					if !ok {
+						return fmt.Errorf("context checkpoint superseded")
+					}
+					revision++
+					return nil
+				}
+			}
+			return fmt.Errorf("missing context boundary")
+		}
+	}
+	graphCfg.Context.Observe = func(ctx context.Context, u aiopsmodel.ContextUsage) {
+		emit(Event{Type: contract.EventContextUsage, ContextUsage: &u})
+		if store != nil && u.Status != "compacting" {
+			if e := store.SaveContextUsage(ctx, sess.ID, userMsg.ID, u); e != nil {
+				rt.log.Warn("save chat context usage", "error", e)
+			}
+		}
+	}
 	// Persona-level MaxTurns override — already honoured for workers
 	// via worker.go runWorker; mirror it here for the coordinator
 	// path so the default persona can have a tighter cap. Without
@@ -586,6 +638,7 @@ func (rt *Runtime) Handle(ctx context.Context, req *Request) (result *Reply, ret
 	//    rt.cfg.CallbackDeps. The SSE handler is appended via the
 	//    cutover layer's emitter when req.Emit != nil.
 	deps := rt.cfg.CallbackDeps
+	deps.BudgetChecker = nil // The window checks the prepared payload, including summary calls.
 	deps.AlertDraftGuard.UserText = req.UserText
 	deps.Persistence.SessionID = sess.ID
 	deps.Persistence.Model = strings.TrimSpace(req.Model)
@@ -1003,6 +1056,9 @@ func (rt *Runtime) toCallbackEmitter(emit Emit, sessionID string) callbacks.SSEE
 func imageInputParts(images []aiopsmodel.Attachment) []schema.MessageInputPart {
 	parts := make([]schema.MessageInputPart, 0, len(images))
 	for _, image := range images {
+		if len(image.Data) == 0 {
+			continue
+		}
 		data := base64.StdEncoding.EncodeToString(image.Data)
 		parts = append(parts, schema.MessageInputPart{
 			Type:  schema.ChatMessagePartTypeImageURL,
@@ -1038,15 +1094,15 @@ func buildEinoHistory(rows []*aiopsmodel.Message) []*schema.Message {
 	// AgentTool sub-agent spawns leave their parent assistant's tool_call
 	// slot dangling — strict providers (DeepSeek v4+) reject with
 	// HTTP 400 "insufficient tool messages following tool_calls message".
-	toolIdx := toolreplay.IndexToolMessagesByCallID(rows)
+	results := toolreplay.IndexTurnResults(rows, callIDs)
 	skipTool := make(map[int]bool)
 	out := make([]*schema.Message, 0, end)
 
-	// emitToolByCallID looks up the tool row matching callID in toolIdx,
+	// emitToolByCallID looks up the tool row paired with this assistant,
 	// appends it to out (as schema.Message), and marks it skipped so the
 	// natural-order iterator below doesn't re-emit it.
-	emitToolByCallID := func(callID string) {
-		j, ok := toolIdx[callID]
+	emitToolByCallID := func(assistantID, callID string) {
+		j, ok := results[assistantID][callID]
 		if !ok || j >= end {
 			// Tool result wasn't persisted (in flight) or sits in the
 			// trimmed trailing user range. Skip silently — the assistant
@@ -1067,14 +1123,19 @@ func buildEinoHistory(rows []*aiopsmodel.Message) []*schema.Message {
 		if tm.ToolName != nil {
 			tname = *tm.ToolName
 		}
-		out = append(out, &schema.Message{
+		msg := &schema.Message{
 			Role:       schema.RoleType(aiopsmodel.RoleTool),
 			Content:    content,
 			ToolCallID: tcID,
 			ToolName:   tname,
-		})
+		}
+		if tm.ResultID != nil {
+			msg.Extra = map[string]any{"result_id": *tm.ResultID}
+		}
+		out = append(out, msg)
 		skipTool[j] = true
 	}
+	var owner *schema.Message
 	for i := 0; i < end; i++ {
 		m := rows[i]
 		switch m.Role {
@@ -1087,32 +1148,50 @@ func buildEinoHistory(rows []*aiopsmodel.Message) []*schema.Message {
 				Content:               *m.Content,
 				UserInputMultiContent: imageInputParts(m.Attachments),
 			}
+			msg.Extra = map[string]any{"context_row": m.ID}
+			if m.Role == aiopsmodel.RoleUser {
+				owner = msg
+			}
+			for _, a := range m.Attachments {
+				if len(a.Data) == 0 {
+					msg.Content += "\n[Earlier image omitted: " + a.ID + "]"
+				}
+			}
 			out = append(out, msg)
 		case aiopsmodel.RoleAssistant:
 			calls, ok := callIDs[m.ID]
-			if len(m.ToolCalls) > 0 && !ok {
-				toolreplay.MarkDependentToolsForSkip(rows, i, len(m.ToolCalls), skipTool)
-				continue
+			toolIdx := results[m.ID]
+			complete := ok || len(m.ToolCalls) == 0
+			for _, call := range calls {
+				if j, found := toolIdx[call.ID]; !found || j >= end {
+					complete = false
+				}
 			}
-			// Precheck: every tool_call we'd emit must have a hoistable
-			// response inside the current window. If any is missing
-			// (parallel ToolsNode dropped an OnEnd → chat_tool_calls
-			// row written but no role=tool chat_messages row), drop the
-			// whole assistant turn + its dependent tools rather than
-			// send an envelope strict providers reject with HTTP 400
-			// "insufficient tool messages following tool_calls".
-			if ok && len(calls) > 0 {
-				complete := true
-				for _, tc := range calls {
-					if j, found := toolIdx[tc.ID]; !found || j >= end {
-						complete = false
-						break
+			var closed []string
+			for _, tc := range m.ToolCalls {
+				switch tc.Status {
+				case aiopsmodel.StatusSuccess, aiopsmodel.StatusError, aiopsmodel.StatusTimeout:
+					if !complete {
+						note := tc.ToolName + " (" + tc.Status + ")"
+						if tc.ResultID != nil {
+							note += " result_id=" + *tc.ResultID
+						}
+						closed = append(closed, note)
+					}
+				default:
+					if owner != nil && (tc.Status == aiopsmodel.StatusPending || !complete) {
+						owner.Extra["unfinished_context_turn"] = true
 					}
 				}
-				if !complete {
-					toolreplay.MarkDependentToolsForSkip(rows, i, len(calls), skipTool)
-					continue
+			}
+			if !complete {
+				// Strict providers require a result for each call in a batch.
+				// Keep the recorded terminal status without inventing tool output.
+				if len(closed) > 0 {
+					out = append(out, schema.AssistantMessage("Historical tool batch has incomplete responses: "+strings.Join(closed, ", "), nil))
 				}
+				toolreplay.MarkDependentToolsForSkip(rows, i, len(m.ToolCalls), skipTool)
+				continue
 			}
 			content := ""
 			if m.Content != nil {
@@ -1154,7 +1233,7 @@ func buildEinoHistory(rows []*aiopsmodel.Message) []*schema.Message {
 			// (e.g. long-running AgentTool finishing after later
 			// short tools).
 			for _, tc := range msg.ToolCalls {
-				emitToolByCallID(tc.ID)
+				emitToolByCallID(m.ID, tc.ID)
 			}
 		case aiopsmodel.RoleTool:
 			// Tool messages are emitted ONLY via hoisting (emitToolByCallID,
@@ -1582,6 +1661,9 @@ func buildGraphErrorApology(err error) string {
 	msg := err.Error()
 	low := strings.ToLower(msg)
 	switch {
+	case strings.Contains(low, "context window exceeded:"):
+		detail, _, _ := strings.Cut(msg[strings.Index(low, "context window exceeded:"):], "\n")
+		return "本次请求超过上下文预算。请缩短当前输入或选择更大的窗口。 " + detail
 	case errors.Is(err, llm.ErrBudgetExceeded):
 		return "今日 LLM token 预算不足，无法继续调用。请联系管理员调整每日限额，或等待预算重置。"
 	// LLM hallucinated a tool name not in its actual schema (e.g.

@@ -106,7 +106,7 @@ func (r *SessionRepo) ResolveAttachments(ctx context.Context, sessionID string, 
 	return out, nil
 }
 
-func (r *SessionRepo) hydrateAttachments(ctx context.Context, messages []*model.Message) error {
+func (r *SessionRepo) hydrateAttachments(ctx context.Context, messages []*model.Message, metadataOnly bool) error {
 	byID := make(map[string]*model.Message, len(messages))
 	ids := make([]string, 0, len(messages))
 	for _, m := range messages {
@@ -122,11 +122,13 @@ func (r *SessionRepo) hydrateAttachments(ctx context.Context, messages []*model.
 	}
 	for i := range rows {
 		a := rows[i]
-		data, err := os.ReadFile(a.StoragePath)
-		if err != nil {
-			return fmt.Errorf("read attachment %s: %w", a.ID, err)
+		if !metadataOnly {
+			data, err := os.ReadFile(a.StoragePath)
+			if err != nil {
+				return fmt.Errorf("read attachment %s: %w", a.ID, err)
+			}
+			a.Data = data
 		}
-		a.Data = data
 		if a.MessageID != nil {
 			if m := byID[*a.MessageID]; m != nil {
 				m.Attachments = append(m.Attachments, a)

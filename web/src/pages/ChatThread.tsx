@@ -14,6 +14,7 @@ import {
 import { AgentBadge } from '@/components/AgentBadge';
 import { PageHeader } from '@/components/ui';
 import {
+  getSessionContext, type ContextUsage,
   getMessages,
   listModels,
   stopSession,
@@ -37,7 +38,7 @@ import {
   unregisterChatTurnController,
 } from '@/lib/chatTurnRegistry';
 
-type LocationState = { initialPrompt?: string; initialAttachments?: File[] } | null;
+type LocationState = { initialPrompt?: string; initialAttachments?: File[]; initialWebSearchEnabled?: boolean } | null;
 
 export default function ChatThreadPage() {
   const { tr, locale } = useI18n();
@@ -49,6 +50,7 @@ export default function ChatThreadPage() {
 
   const sessions = useChatSessions((s) => s.sessions);
   const sessionMeta = sessions.find((s) => String(s.id) === String(sessionId));
+  const [meter, setMeter] = useState<{id:string; usage?:ContextUsage}>();
   const sessionTitle = sessionMeta?.title;
   const sessionAgentID = sessionMeta?.agent_id;
 
@@ -90,7 +92,7 @@ export default function ChatThreadPage() {
   // route use the live server catalog default.
   const [catalogDefault, setCatalogDefault] = useState<ModelSelection | null>(null);
   const persistedSessionModel = sessionMeta?.provider && sessionMeta?.model
-    ? { provider: sessionMeta.provider, model: sessionMeta.model, reasoning_effort: sessionMeta.reasoning_effort }
+    ? { provider: sessionMeta.provider, model: sessionMeta.model, reasoning_effort: sessionMeta.reasoning_effort, context_window_tokens:sessionMeta.context_window_tokens }
     : null;
   const [pendingSessionModel, setPendingSessionModel] = useState<ModelSelection | null>(null);
   const selectedModel = modelSelectionForCatalog(pendingSessionModel ?? persistedSessionModel ?? catalogDefault, providers);
@@ -98,7 +100,9 @@ export default function ChatThreadPage() {
   // enables it for a topic, every follow-up turn until they disable it
   // also exposes the skill. Defaults ON because SearXNG (default provider)
   // is zero-key zero-quota inside our compose stack — no cost to expose.
-  const [webSearchEnabled, setWebSearchEnabled] = useState(true);
+  const initialWebSearchEnabled = (location.state as LocationState)?.initialWebSearchEnabled ?? true;
+  const [webSearchEnabled, setWebSearchEnabled] = useState(initialWebSearchEnabled);
+  useEffect(() => setWebSearchEnabled(initialWebSearchEnabled), [sessionId, initialWebSearchEnabled]);
 
   useEffect(() => {
     let cancelled = false;
@@ -120,11 +124,17 @@ export default function ChatThreadPage() {
 
   useEffect(() => {
     setPendingSessionModel(null);
-  }, [sessionId]);
+    if (!sessionId || sessionMeta?.runtime_version !== 'v3') return;
+    const controller = new AbortController();
+    getSessionContext(sessionId,controller.signal).then(result => {
+      if (!controller.signal.aborted) setMeter(prev => prev?.id === sessionId ? prev : {id:sessionId,usage:result.context_usage});
+    }).catch(() => {});
+    return () => controller.abort();
+  }, [sessionId, sessionMeta?.runtime_version]);
 
   useEffect(() => {
     if (!pendingSessionModel || !persistedSessionModel) return;
-    if (pendingSessionModel.provider === persistedSessionModel.provider && pendingSessionModel.model === persistedSessionModel.model && (pendingSessionModel.reasoning_effort || '') === (persistedSessionModel.reasoning_effort || '')) {
+    if (pendingSessionModel.provider === persistedSessionModel.provider && pendingSessionModel.model === persistedSessionModel.model && (pendingSessionModel.reasoning_effort || '') === (persistedSessionModel.reasoning_effort || '') && (pendingSessionModel.context_window_tokens || 0) === (persistedSessionModel.context_window_tokens || 0)) {
       setPendingSessionModel(null);
     }
   }, [pendingSessionModel, persistedSessionModel]);
@@ -132,7 +142,7 @@ export default function ChatThreadPage() {
   async function handleSessionModelChange(selection: ModelSelection) {
     setPendingSessionModel(selection);
     try {
-      await updateSessionModel(sessionId, selection.provider, selection.model, selection.reasoning_effort);
+      await updateSessionModel(sessionId, selection.provider, selection.model, selection.reasoning_effort, selection.context_window_tokens);
       invalidateChatSessions();
     } catch (err) {
       setPendingSessionModel(null);
@@ -331,6 +341,7 @@ export default function ChatThreadPage() {
         sessionId,
         content,
         {
+          onContextUsage: usage => setMeter({id:sessionId, usage}),
           onAssistant: (e) => {
             if (activeSessionRef.current !== turnSessionID) return;
             // Tool-only turn (no text, agent is just dispatching tools);
@@ -716,8 +727,8 @@ export default function ChatThreadPage() {
           </div>
         </div>
 
-        <div className="bg-zinc-950/80 px-6 py-4">
-          <div className="mx-auto w-full max-w-3xl space-y-2">
+        <div className="bg-zinc-950/80 px-2 py-4 sm:px-6">
+          <div className="og-thread-composer mx-auto w-full max-w-3xl space-y-2">
             {isViewer && (
               <div
                 role="status"
@@ -730,12 +741,14 @@ export default function ChatThreadPage() {
               </div>
             )}
             <ChatInput
+              key={sessionId}
               onSubmit={(p: SubmitPayload) => void send(p.text, p.mentions, { attachments: p.attachments })}
               allowAttachments
               disabled={submitting}
               autoFocus
               placeholder={tr('继续聊…  Shift+Enter 换行', 'Continue the conversation… Shift+Enter for newline')}
               providers={providers}
+              contextEnabled={sessionMeta?.runtime_version === 'v3'} contextUsage={meter?.id === sessionId ? meter.usage : sessionMeta?.context_usage}
               selectedModel={selectedModel}
               onModelChange={(model) => void handleSessionModelChange(model)}
               webSearchEnabled={webSearchEnabled}

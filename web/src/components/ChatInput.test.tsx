@@ -1,4 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import * as agents from '@/api/agents';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -60,7 +62,7 @@ describe('ChatInput image attachments', () => {
         <ChatInput value="" onSubmit={vi.fn()} allowAttachments />
       </MemoryRouter>,
     );
-    expect(screen.getByLabelText('Choose images')).toHaveAttribute('accept', '.png,.jpg,.jpeg,.webp');
+    expect(screen.getByLabelText('Choose files')).toHaveAttribute('accept', '.png,.jpg,.jpeg,.webp,.txt,.log,.md,.csv,.json,.yaml,.yml');
   });
 
   it('previews and submits a selected image', async () => {
@@ -71,7 +73,7 @@ describe('ChatInput image attachments', () => {
       </MemoryRouter>,
     );
     const file = new File([new Uint8Array([137, 80, 78, 71])], 'chart.png', { type: 'image/png' });
-    fireEvent.change(screen.getByLabelText('Choose images'), { target: { files: [file] } });
+    fireEvent.change(screen.getByLabelText('Choose files'), { target: { files: [file] } });
 
     const thumbnail = await screen.findByAltText('chart.png');
     fireEvent.click(thumbnail);
@@ -113,7 +115,7 @@ describe('ChatInput image attachments', () => {
         <ChatInput value="" onSubmit={vi.fn()} allowAttachments />
       </MemoryRouter>,
     );
-    const input = screen.getByLabelText('Choose images');
+    const input = screen.getByLabelText('Choose files');
     const files = Array.from({ length: 4 }, (_, index) =>
       new File([new Uint8Array([137, 80, 78, 71])], `image-${index}.png`, { type: 'image/png' }),
     );
@@ -129,16 +131,103 @@ describe('ChatInput image attachments', () => {
   });
 });
 
-it('toggles web search directly from the globe button', () => {
+it('accepts images and text files together in the same picker', async () => {
+  const onSubmit = vi.fn();
+  render(<MemoryRouter><ChatInput allowAttachments onSubmit={onSubmit} /></MemoryRouter>);
+  const draft = screen.getByRole('textbox');
+  const picker = screen.getByLabelText('Choose files');
+  fireEvent.change(draft, { target: { value: 'Check these' } });
+  const photo = new File(['image'], 'chart.png', { type: 'image/png' });
+  const logs = ['a.log', 'b.TXT'].map(name => {
+    const file = new File(['ready'], name);
+    file.arrayBuffer = async () => new TextEncoder().encode('ready').buffer;
+    return file;
+  });
+  fireEvent.change(picker, { target: { files: [logs[0], photo, logs[1]] } });
+  await screen.findByAltText('chart.png');
+  const text = 'Check these\n\na.log\nready\n\nb.TXT\nready';
+  expect(draft).toHaveValue(text);
+  expect(onSubmit).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+  expect(onSubmit).toHaveBeenCalledWith({ text, mentions: [], attachments: [photo] });
+});
+
+it('keeps the draft intact when a text file is too large or contains invalid UTF-8', async () => {
+  render(<MemoryRouter><ChatInput value="check the logs" allowAttachments onSubmit={vi.fn()} /></MemoryRouter>);
+  const picker = screen.getByLabelText('Choose files');
+  const oversized = new File([new Uint8Array(128 * 1024 + 1)], 'service.log');
+  fireEvent.change(picker, { target: { files: [oversized] } });
+  expect(screen.getByRole('alert')).toHaveTextContent('128 KiB');
+
+  const binary = new File([], 'invalid.txt');
+  binary.arrayBuffer = async () => Uint8Array.of(0xff).buffer;
+  const photo = new File(['image'], 'chart.png', { type: 'image/png' });
+  fireEvent.change(picker, { target: { files: [photo, binary] } });
+  await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('UTF-8'));
+  expect(screen.getByRole('textbox')).toHaveValue('check the logs');
+  expect(screen.queryByAltText('chart.png')).toBeNull();
+});
+
+it('groups composer actions and exposes the current search mode', async () => {
+  const user = userEvent.setup();
   const onToggle = vi.fn();
-  const view = (enabled: boolean) => <MemoryRouter><ChatInput onSubmit={vi.fn()} webSearchEnabled={enabled} onWebSearchToggle={onToggle} /></MemoryRouter>;
-  const { rerender } = render(view(true));
-  const globe = screen.getByRole('switch', { name: 'Disable web search' });
-  expect(globe.querySelector('svg')).toBeInTheDocument();
-  expect(globe).toHaveAttribute('aria-checked', 'true');
-  fireEvent.click(globe);
-  expect(onToggle).toHaveBeenLastCalledWith(false);
-  rerender(view(false));
-  fireEvent.click(screen.getByRole('switch', { name: 'Enable web search' }));
-  expect(onToggle).toHaveBeenLastCalledWith(true);
+  render(<MemoryRouter><ChatInput onSubmit={vi.fn()} allowAttachments webSearchEnabled onWebSearchToggle={onToggle} /></MemoryRouter>);
+  screen.getByRole('button', { name: 'More actions' }).focus();
+  await user.keyboard('{ArrowDown}');
+  expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual(['Add files', 'Mode', 'Experts', 'Skills', 'Connectors']);
+  screen.getByRole('menuitem', { name: 'Mode' }).focus();
+  await user.keyboard('{ArrowRight}');
+  expect(screen.getByRole('menuitemradio', { name: 'Automatic web search' })).toBeChecked();
+  fireEvent.click(screen.getByRole('menuitemradio', { name: 'Web search off' }));
+  expect(onToggle).toHaveBeenCalledWith(false);
+});
+
+it('loads experts when opened and adds the selected expert to the unsent draft', async () => {
+  const list = vi.spyOn(agents, 'listAgents').mockResolvedValue({ items: [{ name: 'specialist-network', description: '' }], total: 1 });
+  const user = userEvent.setup();
+  const onSubmit = vi.fn();
+  try {
+    render(<MemoryRouter><ChatInput onSubmit={onSubmit} /></MemoryRouter>);
+    const input = screen.getByRole('textbox');
+    await user.type(input, 'Check packet loss');
+    screen.getByRole('button', { name: 'More actions' }).focus();
+    await user.keyboard('{ArrowDown}');
+    expect(list).not.toHaveBeenCalled();
+    screen.getByRole('menuitem', { name: 'Experts' }).focus();
+    await user.keyboard('{ArrowRight}');
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Network specialist' }));
+    expect(input).toHaveValue('Check packet loss\nPlease ask the specialist-network expert to assist. ');
+    await waitFor(() => expect(input).toHaveFocus());
+    expect(onSubmit).not.toHaveBeenCalled();
+  } finally {
+    list.mockRestore();
+  }
+});
+
+it('retains the draft and ignores a mixed selection when its serialized message exceeds 1 MiB', async () => {
+  const onSubmit = vi.fn();
+  render(<MemoryRouter><ChatInput allowAttachments onSubmit={onSubmit} /></MemoryRouter>);
+  const draft = screen.getByRole('textbox');
+  fireEvent.change(draft, { target: { value: 'Inspect logs' } });
+  const data = new TextEncoder().encode('a'.repeat(128 * 1024));
+  const logs = Array.from({ length: 8 }, (_, i) => {
+    const file = new File([data], i + '.log');
+    file.arrayBuffer = async () => data.buffer;
+    return file;
+  });
+  const image = new File(['image'], 'chart.png', { type: 'image/png' });
+  fireEvent.change(screen.getByLabelText('Choose files'), { target: { files: [...logs, image] } });
+  expect(await screen.findByRole('alert')).toHaveTextContent('1 MiB');
+  expect(draft).toHaveValue('Inspect logs');
+  expect(screen.queryByAltText('chart.png')).toBeNull();
+
+  // UTF-8 bytes and JSON escapes can exceed the limit after editing too.
+  const escaped = '巡"'.repeat(215000);
+  fireEvent.change(draft, { target: { value: escaped } });
+  fireEvent.keyDown(draft, { key: 'Enter' });
+  expect(onSubmit).not.toHaveBeenCalled();
+  expect(draft).toHaveValue(escaped);
+  fireEvent.change(draft, { target: { value: 'Send separately' } });
+  fireEvent.keyDown(draft, { key: 'Enter' });
+  expect(onSubmit).toHaveBeenCalledWith({ text: 'Send separately', mentions: [], attachments: [] });
 });

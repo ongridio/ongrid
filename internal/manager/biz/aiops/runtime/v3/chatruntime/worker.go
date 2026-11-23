@@ -512,6 +512,7 @@ func (rt *Runtime) runWorker(ctx context.Context, agentDef *Agent, sessID, userT
 	}
 
 	cfg := rt.cfg.GraphCfg
+	cfg.Context = rt.contextWindow(ctx, basetool.LLMProviderFromContext(ctx), basetool.LLMModelFromContext(ctx))
 	if agentDef.MaxTurns > 0 {
 		cfg.MaxIterations = agentDef.MaxTurns
 	}
@@ -543,6 +544,7 @@ func (rt *Runtime) runWorker(ctx context.Context, agentDef *Agent, sessID, userT
 		// config (Audit + Metrics are session-id-aware via their own
 		// deps; we keep the worker's session id flowing into them too).
 		deps := rt.cfg.CallbackDeps
+		deps.BudgetChecker = nil
 		deps.Persistence.SessionID = sessID
 		deps.Persistence.Model = agentDef.Model
 		if deps.Persistence.Repo == nil {

@@ -19,6 +19,8 @@ capabilities:
 can_delegate: true
 
 tools:
+  - read_archived_chat
+  - read_tool_result
   - query_knowledge
   - get_incident_detail
   - query_incidents

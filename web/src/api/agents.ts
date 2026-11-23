@@ -36,6 +36,32 @@ export type UserAgentInput = {
 
 export type AgentListResp = { items: AgentSummary[]; total: number };
 
+const AGENT_LABELS_ZH: Record<string, string> = {
+  default: '默认助理',
+  'incident-investigator': '故障诊断',
+  'specialist-sre': 'SRE 专家',
+  'specialist-ops': '运维专家',
+  'specialist-compute': '计算专家',
+  'specialist-network': '网络专家',
+  'specialist-disk': '磁盘专家',
+  reviewer: '审核员',
+};
+const AGENT_LABELS_EN: Record<string, string> = {
+  default: 'Default',
+  'incident-investigator': 'Incident investigator',
+  'specialist-sre': 'SRE specialist',
+  'specialist-ops': 'Ops specialist',
+  'specialist-compute': 'Compute specialist',
+  'specialist-network': 'Network specialist',
+  'specialist-disk': 'Disk specialist',
+  reviewer: 'Reviewer',
+};
+
+export function agentLabel(name: string) {
+  const zh = AGENT_LABELS_ZH[name];
+  return zh ? trInline(zh, AGENT_LABELS_EN[name] ?? zh) : name;
+}
+
 // BUILTIN_AGENT_I18N: bilingual overrides for built-in agent personas.
 // Backend agents/*.md files store Chinese descriptions; we localize the
 // /agents page card body without modifying the source-of-truth markdown.

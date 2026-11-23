@@ -198,3 +198,38 @@ func MarkAllFollowingToolsForSkip(history []*aiopsmodel.Message, assistantIdx in
 		}
 	}
 }
+
+// IndexTurnResults scopes reused provider call IDs to their assistant turn.
+// Preserve the legacy out-of-order lookup when an ID has only one owner.
+func IndexTurnResults(rows []*aiopsmodel.Message, calls map[string][]ResolvedToolCall) map[string]map[string]int {
+	owners := map[string]int{}
+	for _, batch := range calls {
+		for _, c := range batch {
+			owners[c.ID]++
+		}
+	}
+	unique := IndexToolMessagesByCallID(rows)
+	next := map[string]int{}
+	out := map[string]map[string]int{}
+	for i := len(rows) - 1; i >= 0; i-- {
+		row := rows[i]
+		if row.Role == aiopsmodel.RoleTool && row.ToolCallID != nil {
+			next[*row.ToolCallID] = i
+		}
+		if batch := calls[row.ID]; len(batch) > 0 {
+			results := map[string]int{}
+			for _, c := range batch {
+				if owners[c.ID] == 1 {
+					if j, ok := unique[c.ID]; ok {
+						results[c.ID] = j
+					}
+				} else if j, ok := next[c.ID]; ok {
+					results[c.ID] = j
+					delete(next, c.ID)
+				}
+			}
+			out[row.ID] = results
+		}
+	}
+	return out
+}

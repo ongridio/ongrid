@@ -44,6 +44,7 @@ type scriptedState struct {
 	generateCalls atomic.Int32
 	genErr        error
 	inputsLog     [][]*schema.Message
+	lastMaxTokens *int
 }
 
 // scriptedChatModel is a tool-calling ChatModel test double used by
@@ -67,9 +68,10 @@ func newScriptedChatModel(replies ...*schema.Message) *scriptedChatModel {
 	return &scriptedChatModel{st: &scriptedState{replies: replies}}
 }
 
-func (s *scriptedChatModel) Generate(_ context.Context, input []*schema.Message, _ ...model.Option) (*schema.Message, error) {
+func (s *scriptedChatModel) Generate(_ context.Context, input []*schema.Message, opts ...model.Option) (*schema.Message, error) {
 	s.st.generateCalls.Add(1)
 	s.st.mu.Lock()
+	s.st.lastMaxTokens = model.GetCommonOptions(&model.Options{}, opts...).MaxTokens
 	cp := make([]*schema.Message, len(input))
 	copy(cp, input)
 	s.st.inputsLog = append(s.st.inputsLog, cp)

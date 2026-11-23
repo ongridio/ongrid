@@ -1,5 +1,6 @@
 import { Button, Label, Textarea } from '@/components/ui';
-import { ModelDropdown, WebSearchToggle } from '@/components/ChatModelControls';
+import { ChatActionsMenu } from './ChatActionsMenu';
+import { ModelDropdown } from '@/components/ChatModelControls';
 import {
   useEffect,
   useRef,
@@ -7,9 +8,7 @@ import {
   type KeyboardEvent,
 } from 'react';
 import {
-  Send,
-  // Paperclip / Puzzle removed when the home toolbar's attachments +
-  // plugins picker was parked — see todo/home-chat-toolbar.md.
+  ArrowUp,
   Mail,
   Github,
   Slack,
@@ -19,16 +18,18 @@ import {
   AlertTriangle,
   Bell,
   FileText,
-  Paperclip,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { isImeComposing } from '@/lib/keyboard';
 import type { IconType } from '@/lib/icon';
 import {
   searchMentions,
+  chatMessageBody,
+  MAX_CHAT_BODY_BYTES,
   type Mention,
   type MentionItem,
   type MentionType,
+  type ContextUsage,
   type LLMProvider,
   type ModelSelection,
 } from '@/api/chat';
@@ -61,12 +62,10 @@ type Props = {
   // providers is empty, clicking it opens a panel that points at the
   // settings/integrations page (no more dead "ongrid" placeholder chip).
   providers?: LLMProvider[];
+  contextEnabled?: boolean;
+  contextUsage?: ContextUsage;
   selectedModel?: ModelSelection | null;
   onModelChange?(m: ModelSelection): void;
-  // Globe toggle — when on, the chat send payload tells the agent to
-  // expose the manager-scoped `web_search` skill to the LLM. Default off
-  // so the model doesn't gratuitously search the public web on every
-  // metric question.
   webSearchEnabled?: boolean;
   onWebSearchToggle?(next: boolean): void;
   allowAttachments?: boolean;
@@ -78,6 +77,8 @@ const MAX_IMAGES = 4;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_TOTAL_IMAGE_BYTES = 20 * 1024 * 1024;
 const ACCEPTED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+const TEXT_EXTENSIONS = ['.txt', '.log', '.md', '.csv', '.json', '.yaml', '.yml'];
+const MAX_TEXT_BYTES = 128 * 1024;
 
 export function ChatInput({
   value: controlled,
@@ -89,13 +90,13 @@ export function ChatInput({
   showSkillsRow = false,
   className,
   providers,
-  selectedModel,
+  selectedModel, contextEnabled, contextUsage,
   onModelChange,
   webSearchEnabled,
   onWebSearchToggle,
   allowAttachments = false,
 }: Props) {
-  const { tr } = useI18n();
+  const { tr, locale } = useI18n();
   const effectivePlaceholder = placeholder ?? tr('从任何想法开始… 输入 @ 可调出设备/资源 · Shift+Enter 换行', 'Start anywhere… type @ for devices/resources · Shift+Enter for newline');
   const [internal, setInternal] = useState('');
   const value = controlled ?? internal;
@@ -106,6 +107,7 @@ export function ChatInput({
   const ref = useRef<HTMLTextAreaElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [readingFile, setReadingFile] = useState(false);
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [previewAttachment, setPreviewAttachment] = useState<PendingAttachment | null>(null);
   const [attachmentError, setAttachmentError] = useState('');
@@ -255,37 +257,90 @@ export function ChatInput({
     setChips((prev) => prev.filter((_, i) => i !== idx));
   }
 
-  async function addImageFiles(files: FileList | File[]) {
-    const incoming = Array.from(files);
+  function fitsMessageBudget(content: string, imageCount: number) {
+    const body = chatMessageBody(content.trim(), {
+      provider: selectedModel?.provider, model: selectedModel?.model,
+      reasoning_effort: selectedModel?.reasoning_effort, locale, mentions: chips,
+      webSearchEnabled,
+      // Uploaded attachments use UUIDs. Include their wire size before uploading.
+      attachmentIds: Array<string>(imageCount).fill('00000000-0000-0000-0000-000000000000'),
+    });
+    if (new TextEncoder().encode(JSON.stringify(body)).byteLength <= MAX_CHAT_BODY_BYTES) return true;
+    setAttachmentError(tr('消息超过 1 MiB，请减少文件或拆分发送。', 'Message exceeds 1 MiB. Remove files or split the message.'));
+    return false;
+  }
+
+  async function addFiles(files: File[]) {
+    if (disabled || readingFile || !files.length) return;
     setAttachmentError('');
-    if (attachments.length + incoming.length > MAX_IMAGES) {
+    const images: File[] = [];
+    const documents: File[] = [];
+    for (const file of files) {
+      if (ACCEPTED_IMAGE_TYPES.has(file.type) || (!file.type && /\.(png|jpe?g|webp)$/i.test(file.name))) {
+        if (file.size > MAX_IMAGE_BYTES) {
+          setAttachmentError(tr('单张图片不能超过 5 MiB', 'Each image must be 5 MiB or smaller'));
+          return;
+        }
+        images.push(file);
+      } else if (TEXT_EXTENSIONS.some(ext => file.name.toLowerCase().endsWith(ext))) {
+        if (file.size > MAX_TEXT_BYTES) {
+          setAttachmentError(tr(`文本文件 ${file.name} 超过 128 KiB`, `Text file ${file.name} exceeds 128 KiB`));
+          return;
+        }
+        documents.push(file);
+      } else {
+        setAttachmentError(tr(`不支持 ${file.name}。请选择 PNG、JPEG、WebP、TXT、LOG、MD、CSV、JSON 或 YAML 文件。`, `Unsupported file: ${file.name}. Choose PNG, JPEG, WebP, TXT, LOG, MD, CSV, JSON, or YAML.`));
+        return;
+      }
+    }
+    if (attachments.length + images.length > MAX_IMAGES) {
       setAttachmentError(tr(`每条消息最多添加 ${MAX_IMAGES} 张图片`, `Up to ${MAX_IMAGES} images per message`));
       return;
     }
-    const next: PendingAttachment[] = [];
-    for (const file of incoming) {
-      if (!ACCEPTED_IMAGE_TYPES.has(file.type)) {
-        setAttachmentError(tr('仅支持 PNG、JPEG 和 WebP 图片', 'Only PNG, JPEG, and WebP images are supported'));
-        return;
-      }
-      if (file.size > MAX_IMAGE_BYTES) {
-        setAttachmentError(tr('单张图片不能超过 5 MiB', 'Each image must be 5 MiB or smaller'));
-        return;
-      }
-      next.push({ file, previewURL: URL.createObjectURL(file) });
-    }
-    const total = [...attachments, ...next].reduce((sum, item) => sum + item.file.size, 0);
-    if (total > MAX_TOTAL_IMAGE_BYTES) {
-      next.forEach((item) => URL.revokeObjectURL(item.previewURL));
+    const imageBytes = [...attachments.map(a => a.file), ...images].reduce((sum, file) => sum + file.size, 0);
+    if (imageBytes > MAX_TOTAL_IMAGE_BYTES) {
       setAttachmentError(tr('图片合计不能超过 20 MiB', 'Images must total 20 MiB or less'));
       return;
     }
-    setAttachments((prev) => [...prev, ...next]);
+
+    if (documents.reduce((bytes, file) => bytes + file.size, 0) > MAX_CHAT_BODY_BYTES) {
+      setAttachmentError(tr('文本文件合计超过 1 MiB，请分批添加。', 'Text files exceed 1 MiB in total. Add fewer files at once.'));
+      return;
+    }
+    setReadingFile(true);
+    try {
+      const sections: string[] = [];
+      for (const file of documents) {
+        const text = new TextDecoder('utf-8', { fatal: true }).decode(await file.arrayBuffer());
+        if (!text.trim() || text.includes('\0')) {
+          setAttachmentError(tr(`${file.name} 为空或包含二进制内容`, `${file.name} is empty or contains binary data`));
+          return;
+        }
+        sections.push(file.name + '\n' + text);
+      }
+      const input = ref.current;
+      if (!input) return;
+      const content = [input.value, ...sections].filter(Boolean).join('\n\n');
+      if (!fitsMessageBudget(content, attachments.length + images.length)) return;
+      if (images.length) {
+        const previews = images.map(file => ({ file, previewURL: URL.createObjectURL(file) }));
+        setAttachments(prev => [...prev, ...previews]);
+      }
+      if (sections.length) {
+        setValue(content);
+        input.focus();
+      }
+    } catch {
+      setAttachmentError(tr('无法读取文件，请选择 UTF-8 文本文件', 'Could not read this file. Choose a UTF-8 text file.'));
+    } finally {
+      setReadingFile(false);
+    }
   }
 
   const submit = () => {
     const trimmed = value.trim();
-    if ((!trimmed && attachments.length === 0) || disabled) return;
+    if ((!trimmed && attachments.length === 0) || disabled || readingFile) return;
+    if (!fitsMessageBudget(trimmed, attachments.length)) return;
     onSubmit({ text: trimmed, mentions: chips, attachments: attachments.map((item) => item.file) });
     if (controlled === undefined) setInternal('');
     setChips([]);
@@ -391,11 +446,18 @@ export function ChatInput({
           if (!allowAttachments) return;
           event.preventDefault();
           setDragActive(false);
-          void addImageFiles(event.dataTransfer.files);
+          void addFiles(Array.from(event.dataTransfer.files));
         }}
       >
         {allowAttachments && (
-          <input ref={fileInputRef} type="file" accept=".png,.jpg,.jpeg,.webp" multiple className="sr-only" aria-label={tr('选择图片', 'Choose images')} onChange={(event) => { if (event.target.files) void addImageFiles(event.target.files); event.target.value = ''; }} />
+          <input ref={fileInputRef} type="file" multiple hidden
+            accept={['.png', '.jpg', '.jpeg', '.webp', ...TEXT_EXTENSIONS].join(',')}
+            aria-label={tr('选择文件', 'Choose files')}
+            onChange={(event) => {
+              const files = Array.from(event.target.files ?? []);
+              event.target.value = '';
+              void addFiles(files);
+            }} />
         )}
         {attachments.length > 0 && (
           <div className="flex flex-wrap gap-2 px-4 pt-4" aria-label={tr('待发送图片', 'Images to send')}>
@@ -429,16 +491,14 @@ export function ChatInput({
             // Screenshots copied by browsers and desktop tools are commonly
             // exposed through DataTransferItemList, while clipboardData.files
             // may remain empty (notably on Windows/Chromium).
-            const itemImages = Array.from(event.clipboardData.items ?? [])
-              .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+            const itemFiles = Array.from(event.clipboardData.items ?? [])
+              .filter((item) => item.kind === 'file')
               .map((item) => item.getAsFile())
               .filter((file): file is File => file !== null);
-            const images = itemImages.length > 0
-              ? itemImages
-              : Array.from(event.clipboardData.files).filter((file) => file.type.startsWith('image/'));
-            if (images.length === 0) return;
+            const files = itemFiles.length > 0 ? itemFiles : Array.from(event.clipboardData.files);
+            if (files.length === 0) return;
             event.preventDefault();
-            void addImageFiles(images);
+            void addFiles(files);
           }}
           onClick={() => {
             // Recompute on click — caret may have moved into / out of
@@ -468,37 +528,39 @@ export function ChatInput({
           />
         )}
 
-        <div className="flex items-center justify-between gap-2 px-3 pb-3 pt-1">
-          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+        <div className="og-composer-actions flex items-center px-2 pb-3 pt-1 sm:gap-1 sm:px-3">
+          <ChatActionsMenu
+            disabled={disabled || readingFile}
+            onAddFiles={allowAttachments ? () => fileInputRef.current?.click() : undefined}
+            webSearchEnabled={!!webSearchEnabled}
+            onWebSearchToggle={onWebSearchToggle}
+            onReference={(prompt) => {
+              setValue([value, prompt].filter(Boolean).join('\n') + ' ');
+              requestAnimationFrame(() => ref.current?.focus());
+            }}
+          />
+          <div className="ml-auto flex min-w-0 items-center justify-end">
             <ModelDropdown
               providers={providers ?? []}
+              contextEnabled={contextEnabled} usage={contextUsage}
               selected={selectedModel ?? null}
               onPick={onModelChange}
               disabled={disabled}
             />
-            <WebSearchToggle
-              enabled={!!webSearchEnabled}
-              onToggle={(v) => onWebSearchToggle?.(v)}
-            />
-            {allowAttachments && (
-              <Button variant="subtle" size="sm" type="button" disabled={disabled || attachments.length >= MAX_IMAGES} aria-label={tr('添加图片', 'Add images')} title={tr('添加图片', 'Add images')} className="h-6 w-6 p-0" onClick={() => fileInputRef.current?.click()}>
-                <Paperclip size={14} />
-              </Button>
-            )}
           </div>
           <Button variant="subtle" size="sm"
             type="button"
             onClick={submit}
-            disabled={disabled || empty}
+            disabled={disabled || empty || readingFile}
             aria-label={tr('发送消息', 'Send message')}
             className={cn(
-              'inline-flex h-9 w-9 items-center justify-center rounded-full transition-all',
+              'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors',
               empty || disabled
                 ? 'bg-zinc-800 text-zinc-500'
                 : 'bg-zinc-100 text-zinc-900 hover:bg-white'
             )}
           >
-            <Send size={15} />
+            <ArrowUp size={16} />
           </Button>
         </div>
       </div>

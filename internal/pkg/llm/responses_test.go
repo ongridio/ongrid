@@ -166,6 +166,7 @@ func TestResponsesDoesNotRetryOtherErrorsOrLeakState(t *testing.T) {
 func TestResponsesRejectsIncompleteOrMalformedToolOutput(t *testing.T) {
 	for _, output := range []string{
 		`{"status":"incomplete","output":[{"type":"function_call","call_id":"a","name":"probe","arguments":"{}"}]}`,
+		`{"status":"incomplete","incomplete_details":{"reason":"content_filter"}}`,
 		`{"status":"completed","output":[{"type":"function_call","call_id":"a","name":"probe","arguments":"bad json"}]}`,
 		`{"status":"completed","output":[]}`,
 	} {
@@ -183,6 +184,11 @@ func TestResponsesRejectsIncompleteOrMalformedToolOutput(t *testing.T) {
 			client := newTestClient(t, Config{APIKey: "test", BaseURL: server.URL, Model: "terra"}, nil)
 			result, err := client.Chat(context.Background(), ChatReq{Messages: []Message{{Role: "user", Content: "test"}}})
 			require.Error(t, err)
+			if strings.Contains(output, "content_filter") {
+				require.NotErrorIs(t, err, ErrIncompleteResponse)
+			} else if strings.Contains(output, `"status":"incomplete"`) {
+				require.ErrorIs(t, err, ErrIncompleteResponse)
+			}
 			require.Nil(t, result)
 		})
 	}

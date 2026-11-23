@@ -193,11 +193,7 @@ func buildAIOpsRuntime(
 	}
 
 	// 5. Stitch the runtime.
-	// ctx + llmRouter are reserved for future runtime hooks (e.g.
-	// per-call provider catalog refresh). Reference them so unused-
-	// param lints stay quiet across edits.
 	_ = ctx
-	_ = llmRouter
 	rt, err := aiopschatruntime.NewRuntime(aiopschatruntime.Config{
 		SkillRegistry:   skillReg,
 		AgentRegistry:   agentReg,
@@ -207,7 +203,7 @@ func buildAIOpsRuntime(
 		ToolBag:         wrapped,
 		MentionResolver: nil, // wired below if we have a searcher
 		BasePrompt:      managersvcaiops.BasePrompt(),
-		HistoryLimit:    50,
+		ResolveWindow:   llmRouter.ContextWindow,
 		GraphCfg: aiopsgraph.Config{
 			Model:         cfg.OpenAI.Model,
 			Temperature:   0.1,

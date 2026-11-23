@@ -90,3 +90,23 @@ func TestCreateSessionSnapshotsDefaultEffort(t *testing.T) {
 		t.Fatalf("unsupported default: %+v %v", plain, err)
 	}
 }
+
+func TestSessionContextWindowUsesDeploymentCapacity(t *testing.T) {
+	ctx := context.Background()
+	catalog := &sessionDefaultCatalog{info: llm.ProviderInfo{ID: "custom", Model: "alias", ContextWindows: map[string]llm.WindowCapability{"alias": {Total: 128000, Source: "configuration"}}}}
+	service := &Service{sessions: &memSessions{sessions: map[string]*model.Session{}}, modelCatalog: catalog}
+	for _, n := range []int{-1, 258000, 64001} {
+		if _, e := service.CreateSession(ctx, Caller{UserID: 1}, CreateSessionInput{ContextWindow: n}); !errors.Is(e, errs.ErrInvalid) {
+			t.Fatalf("accepted %d: %v", n, e)
+		}
+	}
+	for _, n := range []int{0, 64000, 128000} {
+		s, e := service.CreateSession(ctx, Caller{UserID: 1}, CreateSessionInput{ContextWindow: n})
+		if e != nil || s.ContextWindow != n {
+			t.Fatalf("window %d: %+v %v", n, s, e)
+		}
+	}
+	if e := service.validateWindow(ctx, "v2", "custom", "alias", 64000); !errors.Is(e, errs.ErrInvalid) {
+		t.Fatal("legacy runtime accepted a v3 window", e)
+	}
+}

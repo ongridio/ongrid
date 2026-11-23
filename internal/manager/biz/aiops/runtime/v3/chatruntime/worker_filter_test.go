@@ -2,6 +2,7 @@ package chatruntime
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
@@ -99,5 +100,26 @@ func TestFilterToolsForAgentRole_NetworkInventoryStaysWithNetworkSpecialist(t *t
 		if !toolbagHas(networkTools, name) {
 			t.Errorf("network specialist missing tool %q", name)
 		}
+	}
+}
+
+func TestShippedPersonasCanLookUpArchivedEvidence(t *testing.T) {
+	r := NewAgentRegistry()
+	if err := r.Load(filepath.Join("..", "..", "..", "..", "..", "..", "..", "agents")); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := r.ByName("specialist-disk"); !ok {
+		t.Fatal("missing shipped disk specialist")
+	}
+	bag := []basetool.BaseTool{basetool.WithValidation(archivedChatTool{}), &originTool{name: "read_tool_result", class: "read"}}
+	for _, p := range r.All() {
+		view := filterToolsForAgentRole(bag, p, false, true)
+		if !toolbagHas(view, "read_archived_chat") || !toolbagHas(view, "read_tool_result") {
+			t.Errorf("missing evidence readers for %s", p.Name)
+		}
+	}
+	restricted := &Agent{Tools: []string{"read_tool_result"}, DisallowedTools: []string{"read_tool_result"}}
+	if got := filterToolsForAgentRole(bag, restricted, false, true); len(got) != 0 {
+		t.Fatal("custom allowlist and explicit deny must still apply")
 	}
 }

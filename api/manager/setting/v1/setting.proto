@@ -158,6 +158,7 @@ message ValidateLLMConfigurationRequest {
     bool tls_insecure = 6 [json_name = "tls_insecure"];
     // 缺省保留已有覆盖；空对象恢复自动；* 配置未知模型的默认规则。
     map<string, ReasoningOverride> reasoning_overrides = 7 [json_name = "reasoning_overrides"];
+    map<string, uint32> context_windows = 8 [json_name = "context_windows"];
 }
 
 message ValidateLLMConfigurationResponse {
@@ -186,6 +187,7 @@ message ValidateAndSaveLLMConfigurationRequest {
     bool tls_insecure = 6 [json_name = "tls_insecure"];
     // 缺省保留已有覆盖；空对象恢复自动；* 配置未知模型的默认规则。
     map<string, ReasoningOverride> reasoning_overrides = 7 [json_name = "reasoning_overrides"];
+    map<string, uint32> context_windows = 8 [json_name = "context_windows"];
 }
 
 message ValidateAndSaveLLMConfigurationResponse {

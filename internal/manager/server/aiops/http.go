@@ -32,6 +32,7 @@ import (
 	biz "github.com/ongridio/ongrid/internal/manager/biz/aiops"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/chatprotocol"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/mentions"
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/contract"
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/runtime/v3/chatruntime"
 	model "github.com/ongridio/ongrid/internal/manager/model/aiops"
 	svc "github.com/ongridio/ongrid/internal/manager/service/aiops"
@@ -43,13 +44,14 @@ import (
 // AIOpsService is the narrow service contract the handler depends on.
 // *svc.Service satisfies it by structural typing; tests swap in a fake.
 type AIOpsService interface {
+	GetSession(context.Context, svc.Caller, string) (*model.Session, error)
 	CreateSession(ctx context.Context, caller svc.Caller, in svc.CreateSessionInput) (*model.Session, error)
 	ListSessions(ctx context.Context, caller svc.Caller, limit, offset int, relatedIncidentID *uint64) ([]*model.Session, error)
 	ListMessages(ctx context.Context, caller svc.Caller, sessionID string) ([]*model.Message, error)
 	CloseSession(ctx context.Context, caller svc.Caller, sessionID string) error
 	DeleteSession(ctx context.Context, caller svc.Caller, sessionID string) error
 	RenameSession(ctx context.Context, caller svc.Caller, sessionID string, title string) error
-	UpdateSessionModel(ctx context.Context, caller svc.Caller, sessionID string, provider string, model string, reasoningEffort string) error
+	UpdateSessionModel(ctx context.Context, caller svc.Caller, sessionID string, provider string, model string, reasoningEffort string, window ...int) error
 	PostMessage(ctx context.Context, caller svc.Caller, sessionID string, content string) (*chatprotocol.Reply, error)
 	PostMessageWithOpts(ctx context.Context, caller svc.Caller, sessionID string, content string, opts chatprotocol.RunOptions) (*chatprotocol.Reply, error)
 	PostMessageStream(ctx context.Context, caller svc.Caller, sessionID string, content string, emit chatprotocol.Emit) (*chatprotocol.Reply, error)
@@ -154,6 +156,7 @@ func (h *Handler) SetOperationActions(operations OperationReader, execute Operat
 func (h *Handler) Register(r chi.Router) {
 	r.Post("/v1/chat/sessions", h.createSession)
 	r.Get("/v1/chat/sessions", h.listSessions)
+	r.Get("/v1/chat/sessions/{id}/context", h.getContext)
 	r.Get("/v1/chat/sessions/{id}/tool-results/{resultID}", h.toolResult)
 	r.Get("/v1/chat/sessions/{id}/tool-results/{resultID}/{resultAction}", h.toolResult)
 	r.Post("/v1/chat/sessions/{id}/tool-results/{resultID}/{resultAction}", h.toolResult)
@@ -314,6 +317,7 @@ func operationArtifactDTOs(items []*model.OperationArtifact) []operationArtifact
 }
 
 type createSessionReq struct {
+	ContextWindow   int                    `json:"context_window_tokens,omitempty"`
 	ReasoningEffort *string                `json:"reasoning_effort,omitempty"`
 	PageContext     *model.PageContext     `json:"page_context,omitempty"`
 	APMSource       *model.APMSourceTarget `json:"apm_source,omitempty"`
@@ -332,6 +336,8 @@ type createSessionReq struct {
 }
 
 type sessionDTO struct {
+	ContextWindow     int                   `json:"context_window_tokens,omitempty"`
+	ContextUsage      *model.ContextUsage   `json:"context_usage,omitempty"`
 	ReasoningEffort   string                `json:"reasoning_effort,omitempty"`
 	PageContext       *model.PageContext    `json:"page_context,omitempty"`
 	RuntimeVersion    string                `json:"runtime_version,omitempty"`
@@ -540,6 +546,7 @@ func (h *Handler) createSession(w http.ResponseWriter, r *http.Request) {
 		AgentID:           req.AgentID,
 		Provider:          req.Provider,
 		Model:             req.Model,
+		ContextWindow:     req.ContextWindow,
 		ReasoningEffort:   req.ReasoningEffort,
 	})
 	if err != nil {
@@ -891,6 +898,8 @@ func eventName(t chatprotocol.EventType) string {
 
 func eventPayload(sessionID string, e chatprotocol.Event) any {
 	switch e.Type {
+	case chatprotocol.EventContextUsage:
+		return e.ContextUsage
 	case chatprotocol.EventAssistant:
 		if e.Assistant == nil {
 			return map[string]any{"session_id": sessionID}
@@ -1006,6 +1015,25 @@ func writeSSE(w http.ResponseWriter, f http.Flusher, name string, payload any) {
 	f.Flush()
 }
 
+func (h *Handler) getContext(w http.ResponseWriter, r *http.Request) {
+	caller, ok := callerFromCtx(r.Context())
+	if !ok {
+		writeErr(w, errs.ErrUnauthorized)
+		return
+	}
+	id, err := parseID(r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	sess, err := h.svc.GetSession(r.Context(), caller, id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"context_window_tokens": sess.ContextWindow, "context_usage": sess.ContextUsage, "runtime_version": sess.RuntimeVersion})
+}
+
 func (h *Handler) listMessages(w http.ResponseWriter, r *http.Request) {
 	caller, ok := callerFromCtx(r.Context())
 	if !ok {
@@ -1076,6 +1104,7 @@ func (h *Handler) closeSession(w http.ResponseWriter, r *http.Request) {
 }
 
 type updateSessionReq struct {
+	ContextWindow   *int    `json:"context_window_tokens,omitempty"`
 	ReasoningEffort *string `json:"reasoning_effort,omitempty"`
 	Title           *string `json:"title,omitempty"`
 	Provider        *string `json:"provider,omitempty"`
@@ -1104,7 +1133,7 @@ func (h *Handler) updateSession(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, errors.Join(errs.ErrInvalid, err))
 		return
 	}
-	if req.Title == nil && req.Provider == nil && req.Model == nil && req.ReasoningEffort == nil {
+	if req.Title == nil && req.Provider == nil && req.Model == nil && req.ReasoningEffort == nil && req.ContextWindow == nil {
 		writeErr(w, fmt.Errorf("%w: no session fields supplied", errs.ErrInvalid))
 		return
 	}
@@ -1114,7 +1143,7 @@ func (h *Handler) updateSession(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if req.Provider != nil || req.Model != nil || req.ReasoningEffort != nil {
+	if req.Provider != nil || req.Model != nil || req.ReasoningEffort != nil || req.ContextWindow != nil {
 		if req.Provider == nil || req.Model == nil {
 			writeErr(w, fmt.Errorf("%w: provider and model must be supplied together", errs.ErrInvalid))
 			return
@@ -1123,7 +1152,11 @@ func (h *Handler) updateSession(w http.ResponseWriter, r *http.Request) {
 		if req.ReasoningEffort != nil {
 			effort = *req.ReasoningEffort
 		}
-		if err := h.svc.UpdateSessionModel(r.Context(), caller, id, *req.Provider, *req.Model, effort); err != nil {
+		var window []int
+		if req.ContextWindow != nil {
+			window = []int{*req.ContextWindow}
+		}
+		if err := h.svc.UpdateSessionModel(r.Context(), caller, id, *req.Provider, *req.Model, effort, window...); err != nil {
 			writeErr(w, err)
 			return
 		}
@@ -1246,7 +1279,13 @@ func (h *Handler) listModels(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, errs.ErrUnauthorized)
 		return
 	}
+	type windowDTO struct {
+		llm.WindowCapability
+		Options []int `json:"options"`
+		Auto    int   `json:"auto"`
+	}
 	type providerDTO struct {
+		ContextWindows        map[string]windowDTO               `json:"context_windows,omitempty"`
 		ReasoningCapabilities map[string]llm.ReasoningCapability `json:"reasoning_capabilities,omitempty"`
 		ReasoningEfforts      map[string][]string                `json:"reasoning_efforts,omitempty"`
 		ID                    string                             `json:"id"`
@@ -1260,10 +1299,18 @@ func (h *Handler) listModels(w http.ResponseWriter, r *http.Request) {
 		Model           string `json:"model"`
 	}
 	type respDTO struct {
-		Providers []providerDTO `json:"providers"`
-		Default   defaultDTO    `json:"default"`
+		RuntimeVersion string        `json:"runtime_version,omitempty"`
+		Providers      []providerDTO `json:"providers"`
+		Default        defaultDTO    `json:"default"`
 	}
 	out := respDTO{Providers: []providerDTO{}}
+	if s, ok := h.svc.(interface {
+		SessionVersion(context.Context) (contract.Version, error)
+	}); ok {
+		if v, e := s.SessionVersion(r.Context()); e == nil {
+			out.RuntimeVersion = string(v)
+		}
+	}
 	if h.catalog != nil {
 		var providers []llm.ProviderInfo
 		if catalog, ok := h.catalog.(interface {
@@ -1286,7 +1333,13 @@ func (h *Handler) listModels(w http.ResponseWriter, r *http.Request) {
 					efforts[model] = levels
 				}
 			}
+			windows := map[string]windowDTO{}
+			for id, c := range p.ContextWindows {
+				auto, _, _ := c.Budget(0)
+				windows[id] = windowDTO{c, c.Options(), auto}
+			}
 			out.Providers = append(out.Providers, providerDTO{
+				ContextWindows:        windows,
 				ReasoningCapabilities: capabilities,
 				ReasoningEfforts:      efforts,
 				ID:                    p.ID,
@@ -1321,10 +1374,11 @@ func toSessionDTO(s *model.Session) sessionDTO {
 		AgentID:           s.AgentID,
 		Provider:          s.Provider,
 		Model:             s.Model,
-		ReasoningEffort:   s.ReasoningEffort,
-		CreatedAt:         s.CreatedAt,
-		UpdatedAt:         s.UpdatedAt,
-		ClosedAt:          s.ClosedAt,
+		ContextWindow:     s.ContextWindow, ContextUsage: s.ContextUsage,
+		ReasoningEffort: s.ReasoningEffort,
+		CreatedAt:       s.CreatedAt,
+		UpdatedAt:       s.UpdatedAt,
+		ClosedAt:        s.ClosedAt,
 	}
 	if s.ScopeJSON != nil && *s.ScopeJSON != "" {
 		var scope []string

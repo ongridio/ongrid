@@ -6,7 +6,7 @@ import { MessageBubble } from '@/components/MessageBubble';
 import { Button, EmptyState, Textarea } from '@/components/ui';
 import { Dialog, DialogClose, DialogContent, DialogTitle } from '@/components/ui/Dialog';
 import { useDialogs } from '@/components/ui/useDialogs';
-import { modelSelectionForCatalog, createSession, deleteSession, getMessages, listModels, listSessions, RejectedChatTurnError, streamMessage, updateSessionModel, type ChatMessage, type ChatSession, type ModelCatalog, type ModelSelection } from '@/api/chat';
+import { modelSelectionForCatalog, createSession, deleteSession, getMessages, listModels, listSessions, RejectedChatTurnError, streamMessage, updateSessionModel, type ContextUsage, type ChatMessage, type ChatSession, type ModelCatalog, type ModelSelection } from '@/api/chat';
 import { ApiError } from '@/api/client';
 import { useI18n } from '@/i18n/locale';
 import { useAssistantSource, type AssistantPage } from '@/lib/assistantPage';
@@ -40,6 +40,8 @@ function FloatingAssistant() {
   const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [savingModel, setSavingModel] = useState(false);
+  const [contextUsage,setContextUsage] = useState<ContextUsage>();
+  const [sessionVersion,setSessionVersion] = useState<string>();
   const [model, setModel] = useState<ModelSelection | null>(null);
   const [catalog, setCatalog] = useState<ModelCatalog | null>(null);
   const [catalogFailed, setCatalogFailed] = useState(false);
@@ -122,7 +124,7 @@ function FloatingAssistant() {
     setSavingModel(true);
     setError('');
     try {
-      await updateSessionModel(sessionId, next.provider, next.model, next.reasoning_effort);
+      await updateSessionModel(sessionId, next.provider, next.model, next.reasoning_effort, next.context_window_tokens);
       setModel(next);
       invalidateChatSessions();
     } catch (err) {
@@ -138,7 +140,7 @@ function FloatingAssistant() {
   }
   function clear() {
     setModel(null); setWebSearch(false);
-    setSessionId(''); setAnchor(null); setDraft(''); setMessages([]); setError(''); setStatus(''); setUncertain(false); setApproval('');
+    setContextUsage(undefined); setSessionVersion(undefined); setSessionId(''); setAnchor(null); setDraft(''); setMessages([]); setError(''); setStatus(''); setUncertain(false); setApproval('');
   }
   async function startNew() {
     if (active.current || savingModel) return;
@@ -184,8 +186,8 @@ function FloatingAssistant() {
           await deleteSession(session.id);
           throw new Error(tr('当前 Manager 不支持页面引用，请升级后重试，或移除引用后提问。', 'This Manager does not support page context. Upgrade it or remove the reference before sending.'));
         }
-        setModel(session.provider && session.model ? { provider: session.provider, model: session.model, reasoning_effort: session.reasoning_effort } : selectedModel);
-        sid = session.id; setSessionId(sid); invalidateChatSessions();
+        setModel(session.provider && session.model ? { provider: session.provider, model: session.model, reasoning_effort: session.reasoning_effort, context_window_tokens:session.context_window_tokens } : selectedModel);
+        sid = session.id; setSessionVersion(session.runtime_version); setSessionId(sid); invalidateChatSessions();
       }
       if (getChatTurnController(sid)) throw new Error(tr('请等待当前回复完成。', 'Wait for the current reply to finish.'));
       registerChatTurnController(sid, controller);
@@ -193,6 +195,7 @@ function FloatingAssistant() {
       setStatus(tr('助理正在分析…', 'Analyzing…'));
       let completed = false;
       await streamMessage(sid, question, {
+        onContextUsage: setContextUsage,
         onAssistant: e => { if (e.content) updateAnswer(e.content); },
         onToolStart: tool => setStatus(tr('正在调用 ', 'Using ') + tool.name),
         onApprovalPending: e => { setApproval(e.approval_id); setStatus(tr('等待审批', 'Waiting for approval')); },
@@ -246,8 +249,8 @@ function FloatingAssistant() {
         {history && open ? <AssistantHistory currentId={sessionId} onBack={() => setHistory(false)}
           confirmSwitch={() => !draft.trim() || confirmAction(tr('放弃未发送的草稿并切换会话？', 'Discard the unsent draft and switch conversations?'))}
           onRestore={(session, items) => {
-            clear(); setSessionId(session.id); setMessages(items);
-            setModel(session.provider && session.model ? { provider: session.provider, model: session.model, reasoning_effort: session.reasoning_effort } : null);
+            clear(); setSessionVersion(session.runtime_version); setContextUsage(session.context_usage); setSessionId(session.id); setMessages(items);
+            setModel(session.provider && session.model ? { provider: session.provider, model: session.model, reasoning_effort: session.reasoning_effort, context_window_tokens:session.context_window_tokens } : null);
             setAnchor({ snapshot: session.page_context ?? null, route: location.key }); setHistory(false);
           }} /> : <>
         {changed && <div className="flex items-center justify-between gap-2 bg-card-soft px-4 py-2 text-xs">
@@ -292,10 +295,10 @@ function FloatingAssistant() {
           <div className="rounded-lg border border-border px-3 pb-2 pt-2.5 focus-within:border-accent">
             <Textarea ref={input} variant="inset" rows={2} className="block w-full resize-none text-sm" aria-label={tr('你的问题', 'Your question')} value={draft} onChange={e => edit(e.target.value)} onKeyDown={onKeyDown} title={tr('Shift + Enter 换行', 'Shift + Enter for a new line')} placeholder={tr('问问当前页面，或描述你的问题…', 'Ask about this view, or describe your question…')} disabled={busy || uncertain}/>
             <div className="mt-1 flex items-center gap-1">
-              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+              <div className="og-composer-actions flex min-w-0 flex-1 flex-wrap items-center gap-1">
                 {catalogFailed ? <Button variant="link" onClick={() => setCatalogAttempt(n => n + 1)}>
                   {tr('重新加载模型', 'Reload models')}
-                </Button> : catalog ? <ModelDropdown providers={catalog.providers ?? []} selected={selectedModel} onPick={pickModel} disabled={locked}/>
+                </Button> : catalog ? <ModelDropdown contextEnabled={(sessionId ? sessionVersion : catalog.runtime_version) === 'v3'} usage={contextUsage} providers={catalog.providers ?? []} selected={selectedModel} onPick={pickModel} disabled={locked}/>
                   : <span role="status" className="text-xs text-text-muted">{tr('正在加载模型…', 'Loading models…')}</span>}
                 <WebSearchToggle enabled={webSearch} onToggle={setWebSearch} disabled={locked}/>
               </div>

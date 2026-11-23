@@ -29,7 +29,10 @@
     outline: 2px solid rgb(var(--text-muted) / 0.5);
     outline-offset: 2px;
   }
+  .og-select-trigger[data-variant="inline"],
   .og-select-trigger[data-variant="ghost"] { @apply border-transparent bg-transparent text-text-muted shadow-none; }
+  .og-composer-actions, .og-select-trigger[data-variant="inline"] { -webkit-tap-highlight-color: transparent; }
+  .og-select-trigger[data-variant="inline"]:is(:hover, :active, [aria-expanded="true"]):not(:disabled) { @apply border-transparent text-text; }
   .og-select-trigger[data-variant="ghost"]:hover:not(:disabled),
   .og-select-trigger[data-variant="ghost"][aria-expanded="true"] { border-color: transparent; background-color: rgb(var(--text) / .05); color: rgb(var(--text)); }
   .og-filter-field { @apply inline-flex h-9 max-w-full min-w-0 items-center rounded-md border border-border bg-card text-xs transition-colors; }
@@ -928,6 +931,14 @@ html.light .og-chip[data-tone="accent"] { color: rgb(67 56 202); }
 .og-assistant-bounds {
   position: fixed; z-index: 40; pointer-events: none;
   inset: max(16px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+}
+/* Leave the chat controls reachable when the launcher and composer share the same column. */
+@media (max-width: 1535px) {
+  .og-thread-composer { anchor-name: --thread-composer; }
+  body:has(.og-thread-composer) .og-assistant-bounds {
+    bottom: 10rem;
+    bottom: calc(anchor(--thread-composer top, 10rem) + 8px);
+  }
 }
 .og-assistant-launcher {
   position: absolute; right: 0; bottom: 0; pointer-events: auto;

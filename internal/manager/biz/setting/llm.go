@@ -3,6 +3,7 @@ package setting
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	model "github.com/ongridio/ongrid/internal/manager/model/setting"
@@ -225,6 +226,7 @@ func (r *LLMSettingsResolver) ResolveProviders(ctx context.Context) ([]llm.Provi
 			}
 		}
 		out = append(out, llm.ProviderConfig{
+			WindowLimits:           r.windowLimits(ctx, pk.id),
 			ReasoningOverrides:     r.reasoningOverrides(ctx, pk.id),
 			DefaultReasoningEffort: r.defaultReasoningEffort(ctx, pk.id, defaultModel),
 			TLSInsecure:            tlsInsecure,
@@ -333,4 +335,28 @@ func dedupStrings(in []string) []string {
 		out = append(out, s)
 	}
 	return out
+}
+
+func validateWindowLimits(limits map[string]int) error {
+	if len(limits) > 256 {
+		return fmt.Errorf("too many model window limits")
+	}
+	for id, n := range limits {
+		if strings.TrimSpace(id) == "" || len(id) > 256 || n < 1024 || n > 16<<20 {
+			return fmt.Errorf("invalid model context window, expected 1024 to 16777216 tokens")
+		}
+	}
+	return nil
+}
+
+func (r *LLMSettingsResolver) windowLimits(ctx context.Context, provider string) map[string]int {
+	raw, found, err := r.svc.Get(ctx, model.CategoryLLM, provider+"_context_windows")
+	if err != nil || !found {
+		return nil
+	}
+	var limits map[string]int
+	if json.Unmarshal([]byte(raw), &limits) != nil || validateWindowLimits(limits) != nil {
+		return nil
+	}
+	return limits
 }

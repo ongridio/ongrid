@@ -734,3 +734,18 @@ func TestModelAdapterPreservesMCPDefinitions(t *testing.T) {
 		t.Fatalf("definitions lost: %s", encoded)
 	}
 }
+
+func TestArchiveLookupSeesNewResultsForIdenticalArguments(t *testing.T) {
+	inner := &fakeBaseTool{name: "read_archived_chat", class: "read", runResp: "[]"}
+	a := &einoToolAdapter{inner: inner, memo: newToolMemo()}
+	const args = `{"list_tool_results":true,"current_turn":true}`
+	before, err := a.InvokableRun(t.Context(), args)
+	if err != nil || before != "[]" {
+		t.Fatal(before, err)
+	}
+	inner.runResp = `[{"result_id":"new"}]`
+	after, err := a.InvokableRun(t.Context(), args)
+	if err != nil || after != inner.runResp || inner.calls.Load() != 2 {
+		t.Fatalf("stale index: %s %v", after, err)
+	}
+}

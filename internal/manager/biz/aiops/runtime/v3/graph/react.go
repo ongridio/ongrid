@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	einomodel "github.com/cloudwego/eino/components/model"
-	einotool "github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
@@ -84,16 +83,19 @@ func BuildReActGraph(
 		return nil, errors.New("graph: BuildReActGraph: model is required")
 	}
 	cfg = cfg.applyDefaults()
+	if cfg.Context != nil {
+		model = &windowModel{inner: model, raw: model, window: cfg.Context}
+	}
 	model = wrapBudgetStopModel(model, cfg.MaxIterations)
 
 	// 1. Build the inner eino react agent. We pass our adapted tools
 	//    in via ToolsConfig.Tools — eino infers the schema by calling
 	//    each tool's Info(ctx).
-	einoTools := WrapBaseTools(tools, cfg.ToolPersistence)
-	baseTools := make([]einotool.BaseTool, 0, len(einoTools))
-	for _, t := range einoTools {
-		baseTools = append(baseTools, t)
+	var live *liveToolResults
+	if cfg.Context != nil {
+		live = &cfg.Context.liveResults
 	}
+	baseTools := wrapBaseTools(tools, cfg.ToolPersistence, live)
 	reactCfg := &react.AgentConfig{
 		ToolCallingModel: model,
 		ToolsConfig: compose.ToolsNodeConfig{
@@ -243,6 +245,7 @@ func assembleMessages(in *Input) ([]*schema.Message, error) {
 			userBody = in.MentionsRendered + "\n\n" + userBody
 		}
 		userMessage := schema.UserMessage(userBody)
+		userMessage.Extra = map[string]any{"current_context_turn": true}
 		userMessage.UserInputMultiContent = in.UserImages
 		out = append(out, userMessage)
 	}

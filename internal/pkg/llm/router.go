@@ -19,6 +19,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 	"sync"
@@ -31,6 +32,7 @@ import (
 // closed-set of model slugs the operator wants to expose for this
 // provider; Label is the human-readable name shown in the UI dropdown.
 type ProviderConfig struct {
+	WindowLimits           map[string]int
 	DefaultReasoningEffort string
 	ReasoningOverrides     map[string]ReasoningOverride
 	TLSInsecure            bool
@@ -45,6 +47,7 @@ type ProviderConfig struct {
 // ProviderInfo is the subset of ProviderConfig safe to leak through the
 // HTTP /v1/aiops/models endpoint (no API key).
 type ProviderInfo struct {
+	ContextWindows         map[string]WindowCapability
 	DefaultReasoningEffort string
 	ReasoningCapabilities  map[string]ReasoningCapability
 	ID                     string
@@ -119,7 +122,7 @@ func NewMultiClient(providers []ProviderConfig, defaultProvider string, fallback
 		if len(models) == 0 && p.Model != "" {
 			models = []string{p.Model}
 		}
-		mc.staticInfos = append(mc.staticInfos, ProviderInfo{DefaultReasoningEffort: p.DefaultReasoningEffort, ReasoningCapabilities: capabilities, ID: p.ID, Label: p.Label, Model: p.Model, Models: models})
+		mc.staticInfos = append(mc.staticInfos, ProviderInfo{ContextWindows: providerWindows(p, nil), DefaultReasoningEffort: p.DefaultReasoningEffort, ReasoningCapabilities: capabilities, ID: p.ID, Label: p.Label, Model: p.Model, Models: models})
 	}
 	// Sort infos for stable JSON output.
 	sort.Slice(mc.staticInfos, func(i, j int) bool { return mc.staticInfos[i].ID < mc.staticInfos[j].ID })
@@ -212,16 +215,26 @@ func (m *MultiClient) activeSubs(ctx context.Context) (map[string]Client, []Prov
 	}
 
 	capabilities := make([]map[string]ReasoningCapability, len(cfgs))
+	windows := make([]map[string]WindowCapability, len(cfgs))
 	var discoveries sync.WaitGroup
 	for i, p := range cfgs {
 		if discovery == nil || strings.TrimSpace(p.APIKey) == "" {
+			windows[i] = providerWindows(p, nil)
 			capabilities[i] = providerReasoning(p, nil)
 			continue
 		}
 		discoveries.Add(1)
 		go func(i int, p ProviderConfig) {
 			defer discoveries.Done()
-			capabilities[i] = providerReasoning(p, discovery.capabilities(ctx, p))
+			catalog := discovery.capabilities(ctx, p)
+			reasoning := make(map[string]ReasoningCapability, len(catalog))
+			for id, entry := range catalog {
+				if entry.Reasoning != nil {
+					reasoning[id] = *entry.Reasoning
+				}
+			}
+			capabilities[i] = providerReasoning(p, reasoning)
+			windows[i] = providerWindows(p, catalog)
 		}(i, p)
 	}
 	discoveries.Wait()
@@ -237,7 +250,7 @@ func (m *MultiClient) activeSubs(ctx context.Context) (map[string]Client, []Prov
 		if len(models) == 0 && p.Model != "" {
 			models = []string{p.Model}
 		}
-		newInfos = append(newInfos, ProviderInfo{DefaultReasoningEffort: p.DefaultReasoningEffort, ReasoningCapabilities: capabilities[i], ID: p.ID, Label: p.Label, Model: p.Model, Models: models})
+		newInfos = append(newInfos, ProviderInfo{ContextWindows: windows[i], DefaultReasoningEffort: p.DefaultReasoningEffort, ReasoningCapabilities: capabilities[i], ID: p.ID, Label: p.Label, Model: p.Model, Models: models})
 	}
 	sort.Slice(newInfos, func(i, j int) bool { return newInfos[i].ID < newInfos[j].ID })
 
@@ -293,6 +306,7 @@ func (m *MultiClient) ProvidersContext(ctx context.Context) []ProviderInfo {
 	out := make([]ProviderInfo, len(infos))
 	for i, info := range infos {
 		out[i] = info
+		out[i].ContextWindows = maps.Clone(info.ContextWindows)
 		out[i].Models = append([]string(nil), info.Models...)
 		out[i].ReasoningCapabilities = make(map[string]ReasoningCapability, len(info.ReasoningCapabilities))
 		for model, capability := range info.ReasoningCapabilities {

@@ -6,14 +6,17 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	einotool "github.com/cloudwego/eino/components/tool"
+	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
+	aiops "github.com/ongridio/ongrid/internal/manager/model/aiops"
 	"github.com/ongridio/ongrid/internal/pkg/toolcapture"
 	"github.com/ongridio/ongrid/internal/pkg/tracing"
 )
@@ -30,23 +33,27 @@ import (
 // this path, so the review/mutation flow is unaffected.
 type toolMemo struct {
 	mu     sync.Mutex
-	m      map[string]string // (tool\x00args) -> result, identical-call cache
-	counts map[string]int    // tool name -> distinct executions this run
-	last   map[string]string // tool name -> most recent successful result this run
+	m      map[string]cachedResult // (tool\x00args) -> result, identical-call cache
+	counts map[string]int          // tool name -> distinct executions this run
+	last   map[string]string       // tool name -> most recent successful result this run
+}
+
+type cachedResult struct {
+	text, resultID string
 }
 
 func newToolMemo() *toolMemo {
-	return &toolMemo{m: make(map[string]string), counts: make(map[string]int), last: make(map[string]string)}
+	return &toolMemo{m: make(map[string]cachedResult), counts: make(map[string]int), last: make(map[string]string)}
 }
 
-func (t *toolMemo) get(k string) (string, bool) {
+func (t *toolMemo) get(k string) (cachedResult, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	v, ok := t.m[k]
 	return v, ok
 }
 
-func (t *toolMemo) put(k, v string) {
+func (t *toolMemo) put(k string, v cachedResult) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.m[k] = v
@@ -316,6 +323,7 @@ func WithInvokeOpts(opts ...basetool.InvokeOption) einotool.Option {
 // reaches this adapter.
 type einoToolAdapter struct {
 	inner       basetool.BaseTool
+	liveResults *liveToolResults
 	persistence ToolInvocationPersistence
 	// memo is the per-run identical-call cache (nil = memoization off, e.g.
 	// the single-tool WrapBaseTool path used by tests). Shared across all
@@ -334,7 +342,8 @@ func (a *einoToolAdapter) resolveInfo(ctx context.Context) {
 	a.infoOnce.Do(func() {
 		if info, err := a.inner.Info(ctx); err == nil && info != nil {
 			a.cacheName = info.Name
-			a.cacheable = info.Class == "read"
+			// The archive index grows after each batch or committed checkpoint.
+			a.cacheable = info.Class == "read" && info.Name != "read_archived_chat"
 		}
 	})
 }
@@ -403,6 +412,16 @@ func (a *einoToolAdapter) InvokableRun(ctx context.Context, argumentsInJSON stri
 	// execution represented as an auto-healed failure in chat history.
 	ctx = toolcapture.WithState(ctx)
 	a.resolveInfo(ctx)
+	if a.cacheName == "read_archived_chat" {
+		ctx = context.WithValue(ctx, liveResultsKey{}, a.liveResults)
+	}
+	if a.liveResults != nil {
+		defer func() {
+			if id := toolcapture.ResultID(ctx); id != "" {
+				a.liveResults.pending.Store(compose.GetToolCallID(ctx), aiops.ArchivedToolReference{ResultID: id, ToolName: a.cacheName, CreatedAt: time.Now().UTC()})
+			}
+		}()
+	}
 	resolved := einotool.GetImplSpecificOptions(&einoInvokeOptKey{}, opts...)
 	sink := a.persistence
 	if sink == nil {
@@ -419,7 +438,8 @@ func (a *einoToolAdapter) InvokableRun(ctx context.Context, argumentsInJSON stri
 		if a.cacheable && a.cacheName != "" {
 			memoKey = a.cacheName + "\x00" + argumentsInJSON
 			if cached, ok := a.memo.get(memoKey); ok {
-				return cached, nil
+				toolcapture.Link(ctx, cached.resultID)
+				return cached.text, nil
 			}
 		}
 		// 2. Per-tool execution cap (all tools): once a tool has run
@@ -489,7 +509,7 @@ func (a *einoToolAdapter) InvokableRun(ctx context.Context, argumentsInJSON stri
 	// Cache successful read-tool results only — a failed call stays
 	// retryable (a transient error shouldn't be pinned for the whole run).
 	if outcome, _ := basetool.ResultOutcome(out); memoKey != "" && outcome == "success" {
-		a.memo.put(memoKey, out)
+		a.memo.put(memoKey, cachedResult{text: out, resultID: toolcapture.ResultID(ctx)})
 	}
 	return out, nil
 }
@@ -499,20 +519,21 @@ func (a *einoToolAdapter) InvokableRun(ctx context.Context, argumentsInJSON stri
 // Nil entries in the input are skipped so callers can pass a sparse
 // list (e.g. from a skill activation filter).
 func WrapBaseTools(tools []basetool.BaseTool, persistence ...ToolInvocationPersistence) []einotool.BaseTool {
-	// One memo shared by every tool in this build = scoped to one run
-	// (the graph is rebuilt per request). The single-tool WrapBaseTool
-	// path deliberately leaves memo nil (tests / non-graph callers).
-	memo := newToolMemo()
 	var sink ToolInvocationPersistence
 	if len(persistence) > 0 {
 		sink = persistence[0]
 	}
+	return wrapBaseTools(tools, sink, nil)
+}
+
+func wrapBaseTools(tools []basetool.BaseTool, sink ToolInvocationPersistence, live *liveToolResults) []einotool.BaseTool {
+	memo := newToolMemo()
 	out := make([]einotool.BaseTool, 0, len(tools))
 	for _, t := range tools {
 		if t == nil {
 			continue
 		}
-		out = append(out, &einoToolAdapter{inner: t, memo: memo, persistence: sink})
+		out = append(out, &einoToolAdapter{inner: t, memo: memo, persistence: sink, liveResults: live})
 	}
 	return out
 }

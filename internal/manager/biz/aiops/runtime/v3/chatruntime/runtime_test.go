@@ -3,6 +3,7 @@ package chatruntime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -125,7 +126,7 @@ func (m *memSessions) CloseSession(_ context.Context, id string) error {
 	return nil
 }
 func (m *memSessions) RenameSession(_ context.Context, _, _ string) error { return nil }
-func (m *memSessions) UpdateSessionModel(_ context.Context, _, _, _ string, reasoningEffort string) error {
+func (m *memSessions) UpdateSessionModel(_ context.Context, _, _, _ string, reasoningEffort string, window ...int) error {
 	return nil
 }
 func (m *memSessions) DeleteSession(_ context.Context, _ string) error { return nil }
@@ -138,7 +139,7 @@ func (m *memSessions) AppendMessage(_ context.Context, msg *model.Message) error
 	m.messages = append(m.messages, msg)
 	return nil
 }
-func (m *memSessions) ListMessages(_ context.Context, sessionID string, _ int) ([]*model.Message, error) {
+func (m *memSessions) ListMessages(_ context.Context, sessionID string, limit int) ([]*model.Message, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := make([]*model.Message, 0, len(m.messages))
@@ -146,6 +147,9 @@ func (m *memSessions) ListMessages(_ context.Context, sessionID string, _ int) (
 		if mg.SessionID == sessionID {
 			out = append(out, mg)
 		}
+	}
+	if limit > 0 && len(out) > limit {
+		out = out[len(out)-limit:]
 	}
 	return out, nil
 }
@@ -1007,7 +1011,7 @@ func TestBuildEinoHistory_DropsOrphanToolMessage(t *testing.T) {
 		{ID: "u0", Role: model.RoleUser, Content: strPtr("load + cpu?")},
 		asst,
 		// real get_host_processes response (correct id)
-		{ID: "t-a", Role: model.RoleTool, ToolCallID: strPtr(callA), ToolName: strPtr("get_host_processes"), Content: strPtr(`{"procs":[]}`)},
+		{ID: "t-a", Role: model.RoleTool, ToolCallID: strPtr(callA), ToolName: strPtr("get_host_processes"), Content: strPtr(`{"procs":[]}`), ResultID: strPtr("c89a0f02-e66f-465b-a161-9784a94d30bc")},
 		// ORPHAN: query_promql's real response stamped with the synthetic
 		// adapter id after the out-of-order completion.
 		{ID: "t-orphan", Role: model.RoleTool, ToolCallID: strPtr("query_promql|einoToolAdapter"), ToolName: strPtr("query_promql"), Content: strPtr(`{"resultType":"matrix"}`)},
@@ -1027,6 +1031,9 @@ func TestBuildEinoHistory_DropsOrphanToolMessage(t *testing.T) {
 			continue
 		}
 		toolCount++
+		if msg.ToolCallID == callA && msg.Extra["result_id"] != "c89a0f02-e66f-465b-a161-9784a94d30bc" {
+			t.Fatal("lost saved result ID for inline tool response")
+		}
 		if !valid[msg.ToolCallID] {
 			t.Errorf("orphan tool message survived: id=%q at %d", msg.ToolCallID, k)
 		}
@@ -1096,5 +1103,67 @@ func TestBuildEinoHistory_SanitizesExpiredToolBudgetResult(t *testing.T) {
 	}
 	if !contains(toolMsg.Content, "may be called again in the current user turn") {
 		t.Fatalf("replay content should tell the model the budget expired: %q", toolMsg.Content)
+	}
+}
+
+func TestRuntimeReplaysBeyondFiftyMessages(t *testing.T) {
+	ctx := context.Background()
+	session := &model.Session{ID: "long", UserID: 1}
+	repo := newMemSessions(session)
+	for i := 0; i < 60; i++ {
+		text := fmt.Sprintf("historic question %d", i)
+		if err := repo.AppendMessage(ctx, &model.Message{SessionID: session.ID, Role: model.RoleUser, Content: &text}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	chat := newScriptedChatModel(schema.AssistantMessage("done", nil))
+	rt, err := NewRuntime(Config{Sessions: repo, ChatModel: chat})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = rt.Handle(ctx, &Request{SessionID: "long", UserID: 1, UserText: "continue"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(chat.inputs) != 1 {
+		t.Fatalf("calls = %d", len(chat.inputs))
+	}
+	for _, msg := range chat.inputs[0] {
+		if msg.Content == "historic question 0" {
+			return
+		}
+	}
+	t.Fatal("oldest user message was lost below the token budget")
+}
+
+func TestContextReusedCallIDsKeepTheirOwnEvidence(t *testing.T) {
+	var rows []*model.Message
+	for _, scope := range []string{"first host", "second host"} {
+		rows = append(rows, &model.Message{ID: scope + "-user", Role: model.RoleUser, Content: strPtr(scope)},
+			&model.Message{ID: scope + "-assistant", Role: model.RoleAssistant, ToolCalls: []model.ToolCall{{ToolName: "read", LLMCallID: strPtr("call_0"), ArgumentsJSON: "{}"}}},
+			&model.Message{ID: scope + "-result", Role: model.RoleTool, ToolCallID: strPtr("call_0"), Content: strPtr(scope + " evidence")})
+	}
+	msgs := buildEinoHistory(rows)
+	if len(msgs) != 6 || msgs[2].Content != "first host evidence" || msgs[5].Content != "second host evidence" {
+		t.Fatalf("mixed tool evidence: %+v", msgs)
+	}
+}
+
+func TestIncompleteReplayPinsOnlyUnfinishedCalls(t *testing.T) {
+	for _, status := range []string{model.StatusPending, model.StatusSuccess, model.StatusError, model.StatusTimeout} {
+		t.Run(status, func(t *testing.T) {
+			rows := []*model.Message{
+				{ID: "u0", Role: model.RoleUser, Content: strPtr("inventory")},
+				{ID: "a0", Role: model.RoleAssistant, ToolCalls: []model.ToolCall{{ToolName: "query_devices", LLMCallID: strPtr("c1"), Status: status}}},
+				{ID: "current", Role: model.RoleUser, Content: strPtr("status?")},
+			}
+			history := buildEinoHistory(rows)
+			pending := status == model.StatusPending
+			if (history[0].Extra["unfinished_context_turn"] == true) != pending {
+				t.Fatalf("unexpected pin for %s", status)
+			}
+			if !pending && (len(history) != 2 || len(history[1].ToolCalls) != 0 || !contains(history[1].Content, "query_devices ("+status+")")) {
+				t.Fatalf("missing terminal status in replay: %+v", history)
+			}
+		})
 	}
 }

@@ -22,6 +22,7 @@ import (
 const anthropicAPIVersion = "2026-10-21"
 
 type CatalogModel struct {
+	Window    WindowCapability
 	ID        string
 	Reasoning *ReasoningCapability
 }
@@ -29,19 +30,30 @@ type CatalogModel struct {
 // FetchModelCatalog keeps optional metadata that OpenAI-compatible SDK structs
 // discard. Credentials stay on the configured origin; redirects are rejected.
 func FetchModelCatalog(ctx context.Context, provider string, cfg Config) ([]CatalogModel, error) {
+	transport := NewHTTPTransport(cfg.TLSInsecure)
+	defer transport.CloseIdleConnections()
+	return fetchModelCatalog(ctx, provider, cfg, transport)
+}
+
+func fetchModelCatalog(ctx context.Context, provider string, cfg Config, transport http.RoundTripper) ([]CatalogModel, error) {
 	baseURL := normalizeOpenAIBaseURL(cfg.BaseURL)
 	if baseURL == "" {
+		if provider != ProviderOpenAI {
+			return nil, errors.New("model catalog base URL is required")
+		}
 		baseURL = "https://api.openai.com/v1"
 	}
 	u, err := url.Parse(strings.TrimRight(baseURL, "/") + "/models")
 	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Scheme != "http" && u.Scheme != "https") {
 		return nil, errors.New("invalid model catalog URL")
 	}
-	transport := NewHTTPTransport(cfg.TLSInsecure)
-	defer transport.CloseIdleConnections()
-	var roundTripper http.RoundTripper = transport
+	// Google's native list includes token limits that its OpenAI-compatible list omits.
+	nativeGemini := provider == ProviderGemini && u.Scheme == "https" && strings.EqualFold(u.Host, "generativelanguage.googleapis.com") && u.Path == "/v1beta/openai/models"
+	if nativeGemini {
+		u.Path = "/v1beta/models"
+	}
 	if zhipuauth.LooksLikeZhipuURL(baseURL) && zhipuauth.LooksLikeZhipuKey(cfg.APIKey) {
-		roundTripper = &zhipuJWTTransport{apiKey: cfg.APIKey, base: roundTripper}
+		transport = &zhipuJWTTransport{apiKey: cfg.APIKey, base: transport}
 	}
 	timeout := cfg.Timeout
 	if timeout <= 0 {
@@ -49,25 +61,35 @@ func FetchModelCatalog(ctx context.Context, provider string, cfg Config) ([]Cata
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	client := &http.Client{Transport: roundTripper, CheckRedirect: func(*http.Request, []*http.Request) error {
+	client := &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error {
 		return errors.New("model catalog redirects are not allowed")
 	}}
 	models := make([]CatalogModel, 0)
 	after := ""
 	for page := 0; page < 4; page++ {
-		if provider == ProviderAnthropic {
-			query := u.Query()
+		query := u.Query()
+		switch {
+		case nativeGemini:
+			query.Set("pageSize", "1000")
+			if after != "" {
+				query.Set("pageToken", after)
+			}
+		case provider == ProviderAnthropic:
 			query.Set("limit", "1000")
 			if after != "" {
 				query.Set("after_id", after)
 			}
-			u.RawQuery = query.Encode()
 		}
+		u.RawQuery = query.Encode()
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 		if err != nil {
 			return nil, fmt.Errorf("build model catalog request: %w", err)
 		}
-		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+		if nativeGemini {
+			req.Header.Set("x-goog-api-key", cfg.APIKey)
+		} else {
+			req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+		}
 		req.Header.Set("Accept", "application/json")
 		if provider == ProviderAnthropic {
 			req.Header.Set("x-api-key", cfg.APIKey)
@@ -92,14 +114,34 @@ func FetchModelCatalog(ctx context.Context, provider string, cfg Config) ([]Cata
 			return nil, errors.New("model catalog exceeds 2 MiB")
 		}
 		var payload struct {
-			Data    []catalogModelJSON `json:"data"`
-			HasMore bool               `json:"has_more"`
-			LastID  string             `json:"last_id"`
+			Data          []catalogModelJSON `json:"data"`
+			HasMore       bool               `json:"has_more"`
+			LastID        string             `json:"last_id"`
+			NextPageToken string             `json:"nextPageToken"`
+			Models        []struct {
+				Name   string `json:"name"`
+				Input  int    `json:"inputTokenLimit"`
+				Output int    `json:"outputTokenLimit"`
+			} `json:"models"`
 		}
 		if err := json.Unmarshal(raw, &payload); err != nil {
 			return nil, errors.New("invalid model catalog JSON")
 		}
-		if payload.Data == nil {
+		if nativeGemini {
+			if payload.Models == nil {
+				return nil, errors.New("model catalog is missing models")
+			}
+			payload.Data = make([]catalogModelJSON, 0, len(payload.Models))
+			for _, m := range payload.Models {
+				item := catalogModelJSON{ID: strings.TrimPrefix(m.Name, "models/"), MaxInput: m.Input, MaxOutput: m.Output}
+				// Some Gemini models count both input and output against the reported limit.
+				if builtinWindow(ProviderGemini, item.ID).Total > 0 {
+					item.ContextWindow = m.Input
+				}
+				payload.Data = append(payload.Data, item)
+			}
+			payload.LastID, payload.HasMore = payload.NextPageToken, payload.NextPageToken != ""
+		} else if payload.Data == nil {
 			return nil, errors.New("model catalog is missing data")
 		}
 		for _, item := range payload.Data {
@@ -111,12 +153,12 @@ func FetchModelCatalog(ctx context.Context, provider string, cfg Config) ([]Cata
 			if err != nil {
 				return nil, fmt.Errorf("invalid model reasoning metadata: %w", err)
 			}
-			models = append(models, CatalogModel{ID: id, Reasoning: capability})
+			models = append(models, CatalogModel{ID: id, Reasoning: capability, Window: item.window(provider)})
 		}
 		if !payload.HasMore {
 			return models, nil
 		}
-		if provider != ProviderAnthropic || payload.LastID == "" || payload.LastID == after {
+		if (!nativeGemini && provider != ProviderAnthropic) || payload.LastID == "" || payload.LastID == after {
 			return nil, errors.New("invalid model catalog pagination")
 		}
 		after = payload.LastID
@@ -128,6 +170,17 @@ type capabilitySupport struct {
 	Supported bool `json:"supported"`
 }
 type catalogModelJSON struct {
+	ContextWindow int `json:"context_window"`
+	ContextLength int `json:"context_length"`
+	MaxModelLen   int `json:"max_model_len"`
+	MaxInput      int `json:"max_input_tokens"`
+	MaxOutput     int `json:"max_output_tokens"`
+	MaxTokens     int `json:"max_tokens"`
+	MaxCompletion int `json:"max_completion_tokens"`
+	TopProvider   struct {
+		ContextLength int `json:"context_length"`
+		MaxCompletion int `json:"max_completion_tokens"`
+	} `json:"top_provider"`
 	ID     string `json:"id"`
 	Effort *struct {
 		Levels       []string `json:"supported_levels"`
@@ -153,6 +206,32 @@ type catalogModelJSON struct {
 			} `json:"types"`
 		} `json:"thinking"`
 	} `json:"capabilities"`
+}
+
+func smallestModelLimit(values ...int) int {
+	result := 0
+	for _, v := range values {
+		if v > 0 && v <= 16<<20 && (result == 0 || v < result) {
+			result = v
+		}
+	}
+	return result
+}
+
+func (m catalogModelJSON) window(provider string) WindowCapability {
+	c := WindowCapability{
+		Total:  smallestModelLimit(m.ContextWindow, m.ContextLength, m.MaxModelLen, m.TopProvider.ContextLength),
+		Input:  smallestModelLimit(m.MaxInput),
+		Output: smallestModelLimit(m.MaxOutput, m.MaxCompletion, m.TopProvider.MaxCompletion),
+	}
+	if provider == ProviderAnthropic {
+		c.Total = smallestModelLimit(c.Total, c.Input)
+		c.Output = smallestModelLimit(c.Output, m.MaxTokens)
+	}
+	if c.Maximum() > 0 {
+		c.Source = "provider"
+	}
+	return c
 }
 
 func (m catalogModelJSON) reasoning(provider string) (*ReasoningCapability, error) {
@@ -214,7 +293,7 @@ func (m catalogModelJSON) reasoning(provider string) (*ReasoningCapability, erro
 
 type reasoningDiscoveryEntry struct {
 	fingerprint  [32]byte
-	capabilities map[string]ReasoningCapability
+	capabilities map[string]CatalogModel
 	nextFetch    time.Time
 	fetching     chan struct{}
 }
@@ -226,7 +305,7 @@ type ReasoningDiscovery struct {
 	entries map[string]*reasoningDiscoveryEntry
 }
 
-func (d *ReasoningDiscovery) capabilities(ctx context.Context, p ProviderConfig) map[string]ReasoningCapability {
+func (d *ReasoningDiscovery) capabilities(ctx context.Context, p ProviderConfig) map[string]CatalogModel {
 	fingerprint := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%t", p.BaseURL, p.APIKey, p.TLSInsecure)))
 	d.mu.Lock()
 	if d.entries == nil {
@@ -261,11 +340,9 @@ func (d *ReasoningDiscovery) capabilities(ctx context.Context, p ProviderConfig)
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if err == nil {
-		entry.capabilities = make(map[string]ReasoningCapability)
+		entry.capabilities = make(map[string]CatalogModel)
 		for _, model := range models {
-			if model.Reasoning != nil {
-				entry.capabilities[model.ID] = *model.Reasoning
-			}
+			entry.capabilities[model.ID] = model
 		}
 		entry.nextFetch = time.Now().Add(time.Hour + time.Duration(rand.IntN(300))*time.Second)
 	} else {

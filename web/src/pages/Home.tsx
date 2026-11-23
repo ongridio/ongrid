@@ -158,6 +158,7 @@ export default function HomePage() {
   // The browser store holds the current draft; each visit reloads the saved server default.
   const storeModel = useModelSelection((s) => s.selected);
   const setStoreModel = useModelSelection((s) => s.setSelected);
+  const [contextEnabled,setContextEnabled] = useState(false);
   const [catalogDefault, setCatalogDefault] = useState<ModelSelection | null>(null);
   const selectedModel = storeModel ?? catalogDefault;
   // SearXNG ships zero-key zero-quota in our compose stack — leave on by default.
@@ -183,10 +184,15 @@ export default function HomePage() {
       .then((cat) => {
         if (cancelled) return;
         setProviders(cat.providers ?? []);
+        setContextEnabled(cat.runtime_version === 'v3');
         if (cat.default && cat.default.provider) {
           const d: ModelSelection = { ...cat.default, reasoning_effort: cat.default.reasoning_effort || '' };
           setCatalogDefault(d);
           // The server default includes effort; browser-local preferences may be stale.
+          const previous = useModelSelection.getState().selected;
+          if (cat.runtime_version === 'v3' && previous?.provider === d.provider && previous.model === d.model && previous.context_window_tokens &&
+              cat.providers.find(p => p.id === d.provider)?.context_windows?.[d.model]?.options?.includes(previous.context_window_tokens))
+            d.context_window_tokens = previous.context_window_tokens;
           setStoreModel(d);
         }
       })
@@ -203,14 +209,15 @@ export default function HomePage() {
   async function handleModelChange(sel: ModelSelection | null) {
     if (!sel || savingModelRef.current || loadingModels) return;
     const previous = useModelSelection.getState().selected;
-    if (previous?.provider === sel.provider && previous.model === sel.model && (previous.reasoning_effort || '') === (sel.reasoning_effort || '')) return;
+    if (previous?.provider === sel.provider && previous.model === sel.model && (previous.reasoning_effort || '') === (sel.reasoning_effort || '')) { setStoreModel(sel); return; }
     setStoreModel(sel);
     if (!isAdmin) return;
     savingModelRef.current = true;
     setSavingModel(true);
     setError(null);
     try {
-      setStoreModel(await saveLLMDefault(sel));
+      const { context_window_tokens, ...route } = sel;
+      setStoreModel({...await saveLLMDefault(route),context_window_tokens});
     } catch (err) {
       setStoreModel(previous);
       setError((err as Error).message || tr('保存默认模型失败', 'Failed to save the default model'));
@@ -235,12 +242,13 @@ export default function HomePage() {
         provider: selectedModel?.provider,
         model: selectedModel?.model,
         reasoning_effort: selectedModel?.reasoning_effort,
+        context_window_tokens: contextEnabled ? selectedModel?.context_window_tokens : undefined,
       });
       // Don't post here — ChatThread takes the initialPrompt and runs it
       // through the SSE streamMessage path so the user sees tool cards and
       // the assistant reply incrementally. The picked model is already stored
       // on the new session, so every browser inherits the same route.
-      navigate(`/chat/${session.id}`, { state: { initialPrompt: content, initialAttachments: attachments } });
+      navigate(`/chat/${session.id}`, { state: { initialPrompt: content, initialAttachments: attachments, initialWebSearchEnabled: webSearchEnabled } });
     } catch (err) {
       setError((err as Error).message || tr('创建会话失败', 'Failed to create session'));
       setSubmitting(false);
@@ -265,7 +273,7 @@ export default function HomePage() {
             {greeting}
           </h1>
 
-          <ChatInput
+          <ChatInput contextEnabled={contextEnabled}
             value={draft}
             onChange={setDraft}
             onSubmit={(p) => {

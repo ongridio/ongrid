@@ -12,6 +12,8 @@ when_to_use: |
   reviewer 跑完通过 <task-notification> 投递。
 
 tools:
+  - read_archived_chat
+  - read_tool_result
   - get_incident_detail
   - get_host_summary
   - query_promql

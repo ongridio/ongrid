@@ -77,7 +77,10 @@ type ToolEvent struct {
 // Type == EventTaskNotification and a background worker reaches a
 // terminal state. The SPA / SSE adapter renders it as a separate frame
 // type next to assistant / tool / done.
+const EventContextUsage EventType = "context_usage"
+
 type Event struct {
+	ContextUsage *aiopsmodel.ContextUsage
 	Type         EventType
 	Assistant    *AssistantEvent
 	Tool         *ToolEvent

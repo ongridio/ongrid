@@ -118,6 +118,20 @@ func (s *Service) validateReasoningEffort(ctx context.Context, provider, model, 
 	return llm.ValidateReasoningEffort(provider, model, effort)
 }
 
+func (s *Service) validateWindow(ctx context.Context, version, provider, model string, window int) error {
+	if window == 0 {
+		return nil
+	}
+	if version == "v3" && s.modelCatalog != nil {
+		for _, p := range s.modelProviders(ctx) {
+			if p.ID == provider && p.ContextWindows[model].Supports(window) {
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("%w: unsupported context window for this model", errs.ErrInvalid)
+}
+
 func (s *Service) UploadAttachment(ctx context.Context, caller Caller, sessionID, name, mimeType string, size int64, src io.Reader) (*model.Attachment, error) {
 	if caller.IsViewer() {
 		return nil, errs.ErrForbidden
@@ -198,6 +212,7 @@ func (s *Service) ListMutatingProposals(ctx context.Context, caller Caller, f bi
 // the signature stays additive (callers don't break when a new field
 // like RelatedIncidentID lands).
 type CreateSessionInput struct {
+	ContextWindow   int
 	ReasoningEffort *string
 	PageContext     *model.PageContext
 	APMSource       *model.APMSourceTarget
@@ -277,19 +292,15 @@ func (s *Service) CreateSession(ctx context.Context, caller Caller, in CreateSes
 	if err := s.validateReasoningEffort(ctx, provider, selectedModel, effort); err != nil {
 		return nil, fmt.Errorf("%w: %v", errs.ErrInvalid, err)
 	}
-	// The current direct-runtime compatibility path is v3. Production uses
-	// the router's validated default; no caller-facing version override yet.
-	version := chatruntime.V3
-	if selector, ok := s.runtime.(interface {
-		SessionVersion(context.Context) (chatruntime.Version, error)
-	}); ok {
-		var err error
-		version, err = selector.SessionVersion(ctx)
-		if err != nil {
-			return nil, err
-		}
+	version, err := s.SessionVersion(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.validateWindow(ctx, string(version), provider, selectedModel, in.ContextWindow); err != nil {
+		return nil, err
 	}
 	sess := &model.Session{
+		ContextWindow:     in.ContextWindow,
 		ReasoningEffort:   effort,
 		RuntimeVersion:    string(version),
 		UserID:            caller.UserID,
@@ -358,6 +369,15 @@ func (s *Service) ListMessages(ctx context.Context, caller Caller, sessionID str
 	if _, err := s.GetSession(ctx, caller, sessionID); err != nil {
 		return nil, err
 	}
+	return s.listMessageMetadata(ctx, sessionID)
+}
+
+func (s *Service) listMessageMetadata(ctx context.Context, sessionID string) ([]*model.Message, error) {
+	if reader, ok := s.sessions.(interface {
+		ListMessageMetadata(context.Context, string) ([]*model.Message, error)
+	}); ok {
+		return reader.ListMessageMetadata(ctx, sessionID)
+	}
 	return s.sessions.ListMessages(ctx, sessionID, 0)
 }
 
@@ -401,8 +421,9 @@ func (s *Service) RenameSession(ctx context.Context, caller Caller, sessionID st
 // UpdateSessionModel changes the persisted LLM route for one owned session.
 // Provider/model form a pair; accepting only one would create an ambiguous
 // route and could send a model slug to the wrong upstream.
-func (s *Service) UpdateSessionModel(ctx context.Context, caller Caller, sessionID string, provider string, selectedModel string, reasoningEffort string) error {
-	if _, err := s.GetSession(ctx, caller, sessionID); err != nil {
+func (s *Service) UpdateSessionModel(ctx context.Context, caller Caller, sessionID string, provider string, selectedModel string, reasoningEffort string, window ...int) error {
+	sess, err := s.GetSession(ctx, caller, sessionID)
+	if err != nil {
 		return err
 	}
 	provider = strings.TrimSpace(provider)
@@ -413,7 +434,12 @@ func (s *Service) UpdateSessionModel(ctx context.Context, caller Caller, session
 	if err := s.validateReasoningEffort(ctx, provider, selectedModel, reasoningEffort); err != nil {
 		return fmt.Errorf("%w: %v", errs.ErrInvalid, err)
 	}
-	return s.sessions.UpdateSessionModel(ctx, sessionID, provider, selectedModel, reasoningEffort)
+	if len(window) > 0 {
+		if err := s.validateWindow(ctx, sess.RuntimeVersion, provider, selectedModel, window[0]); err != nil {
+			return err
+		}
+	}
+	return s.sessions.UpdateSessionModel(ctx, sessionID, provider, selectedModel, reasoningEffort, window...)
 }
 
 // PostMessage runs one user turn through the agent and returns the final
@@ -494,8 +520,10 @@ func (s *Service) runChat(ctx context.Context, caller Caller, sessionID string, 
 			return nil, &TurnRejectedError{fmt.Errorf("%w: %v", errs.ErrInvalid, err)}
 		}
 	}
-	if err := s.validateImageContext(ctx, sessionID, &opts); err != nil {
-		return nil, &TurnRejectedError{err}
+	if sess.RuntimeVersion != string(chatruntime.V3) {
+		if err := s.validateImageContext(ctx, sessionID, &opts); err != nil {
+			return nil, &TurnRejectedError{err}
+		}
 	}
 
 	// HLD-021: detach the chat turn from the HTTP request lifecycle. A turn now
@@ -527,7 +555,7 @@ func (s *Service) validateImageContext(ctx context.Context, sessionID string, op
 	for _, attachment := range opts.Attachments {
 		total += attachment.Size
 	}
-	history, err := s.sessions.ListMessages(ctx, sessionID, 0)
+	history, err := s.listMessageMetadata(ctx, sessionID)
 	if err != nil {
 		return err
 	}
@@ -663,7 +691,7 @@ func (s *Service) runGraph(ctx context.Context, sess *model.Session, content str
 // chatprotocol.Event shape so the SSE handler can keep its existing
 // switch-on-Type code path untouched. Frame names stay byte-equal.
 func translateRuntimeEvent(ev chatruntime.Event) chatprotocol.Event {
-	out := chatprotocol.Event{Type: chatprotocol.EventType(ev.Type)}
+	out := chatprotocol.Event{Type: chatprotocol.EventType(ev.Type), ContextUsage: ev.ContextUsage}
 	if ev.Assistant != nil {
 		out.Assistant = &chatprotocol.AssistantEvent{
 			Iteration:        ev.Assistant.Iteration,
@@ -747,4 +775,13 @@ func runtimeReplyToAgentReply(r *chatruntime.Reply) *chatprotocol.Reply {
 // requiring auth upstream.
 func (s *Service) UsageToday(ctx context.Context) (*biz.DailyUsage, error) {
 	return s.usage.Today(ctx)
+}
+
+func (s *Service) SessionVersion(ctx context.Context) (chatruntime.Version, error) {
+	if selector, ok := s.runtime.(interface {
+		SessionVersion(context.Context) (chatruntime.Version, error)
+	}); ok {
+		return selector.SessionVersion(ctx)
+	}
+	return chatruntime.V3, nil
 }
