@@ -433,3 +433,122 @@ func TestLiveToolLinksSurviveConsecutiveCompactionAt256K(t *testing.T) {
 		t.Fatalf("missing stored links in handoff: %s", notes)
 	}
 }
+
+func TestCurrentToolIndexIncludesMiddleResultsAndUpdatesAfterLookup(t *testing.T) {
+	var live liveToolResults
+	ctx := context.WithValue(t.Context(), liveResultsKey{}, &live)
+	var body []*schema.Message
+	var middle string
+	for i := 0; i < 48; i++ {
+		id := fmt.Sprintf("00000000-0000-4000-8000-%012d", i)
+		name := "query_devices"
+		if i%2 == 1 {
+			name = "get_host_summary"
+		}
+		live.pending.Store("call_0", aiops.ArchivedToolReference{ResultID: id, ToolName: name})
+		result := schema.ToolMessage("ok", "call_0")
+		result.ToolName = name
+		body = append(body, makeAssistantToolCall("", "call_0", name, "{}"), result)
+		live.bind(body)
+		if i == 22 {
+			middle = id
+		}
+	}
+	notes := withResultReferences("notes", "", live.forSummary(body, 0))
+	if strings.Contains(notes, middle) {
+		t.Fatal("test needs a result outside the bounded summary")
+	}
+	first, err := CurrentToolResults(ctx, "query_devices", 0)
+	if err != nil || len(first.Results) != 16 || first.Next != 16 || first.Results[11].ResultID != middle {
+		t.Fatalf("first page: %+v %v", first, err)
+	}
+	last, err := CurrentToolResults(ctx, "query_devices", first.Next)
+	if err != nil || len(last.Results) != 8 || last.Next != 0 || last.Results[0].ResultID == first.Results[15].ResultID {
+		t.Fatalf("last page: %+v %v", last, err)
+	}
+	other, err := CurrentToolResults(t.Context(), "", 0)
+	if err != nil || len(other.Results) != 0 {
+		t.Fatal("result crossed graph invocations")
+	}
+}
+
+func TestStoredStepsReduceInputAcrossTwoCompactionsAt256K(t *testing.T) {
+	raw := newScriptedChatModel()
+	w := &ContextWindow{Capability: llm.WindowCapability{Total: 256000}}
+	m := &windowModel{window: w, raw: raw, tools: []*schema.ToolInfo{{Name: "read_tool_result"}}}
+	current := currentContextMessage()
+	current.Content = strings.Repeat("巡", 131000)
+	in := []*schema.Message{current}
+	for i := 0; i < 3; i++ {
+		name := "get_host_summary"
+		id := fmt.Sprintf("00000000-0000-4000-8000-%012d", i)
+		args := fmt.Sprintf(`{"device_id":%d}`, i+71)
+		call := makeAssistantToolCall("Keep host in observation.", "same", name, args)
+		call.ReasoningContent = "PRIVATE_REASONING"
+		result := schema.ToolMessage(strings.Repeat("sample ", 2000), "same")
+		result.ToolName = name
+		w.liveResults.pending.Store("same", aiops.ArchivedToolReference{ResultID: id, ToolName: name})
+		in = append(in, call, result)
+		view, _, usage, err := m.prepare(t.Context(), in, nil)
+		if err != nil || view[len(view)-1] != result {
+			t.Fatalf("lost current result: %+v %v", usage, err)
+		}
+		if i == 0 {
+			continue
+		}
+		if w.stepCut != i*2 || usage.Window != 256000 || usage.Before-usage.After < 3000 || raw.st.generateCalls.Load() != 0 {
+			t.Fatalf("step %d: cut=%d usage=%+v model calls=%d", i, w.stepCut, usage, raw.st.generateCalls.Load())
+		}
+		for j := 0; j < i; j++ {
+			if !strings.Contains(w.stepSummary, fmt.Sprintf(`{"device_id":%d}`, 71+j)) || !strings.Contains(w.stepSummary, fmt.Sprintf("00000000-0000-4000-8000-%012d", j)) {
+				t.Fatal("lost an earlier call or storage link")
+			}
+		}
+		if !strings.Contains(w.stepSummary, "Keep host in observation.") || strings.Contains(w.stepSummary, "PRIVATE_REASONING") {
+			t.Fatal("incorrect visible assistant notes")
+		}
+	}
+}
+
+func TestStoredStepsRequireCompleteEvidence(t *testing.T) {
+	id := "00000000-0000-4000-8000-000000000009"
+	call := makeAssistantToolCall("", "call", "get_host_summary", "{}")
+	for _, tc := range []struct{ body, id string }{
+		{`{"device_id":7}`, ""},
+		{`{"status":"failed","error":"no sample"}`, id},
+		{fmt.Sprintf(`{"kind":"tool_result","result_id":%q,"capture_status":"partial","storage_status":"ready"}`, id), id},
+		{fmt.Sprintf(`{"kind":"tool_result","result_id":%q,"capture_status":"complete","storage_status":"pending"}`, id), id},
+	} {
+		result := schema.ToolMessage(tc.body, "call")
+		result.Extra = map[string]any{"result_id": tc.id}
+		if _, ok := storedStepNotes("", []*schema.Message{call, result}); ok {
+			t.Fatalf("accepted incomplete evidence: %s", tc.body)
+		}
+	}
+}
+
+func TestCheckpointWriteFailureStillCompactsRecoverableLiveSteps(t *testing.T) {
+	raw := newScriptedChatModel(schema.AssistantMessage("Historical observations.", nil))
+	w := &ContextWindow{
+		Capability: llm.WindowCapability{Total: 256000},
+		Save: func(context.Context, string, string, aiops.ContextCompaction) error {
+			return errors.New("unavailable checkpoint store")
+		},
+	}
+	m := &windowModel{raw: raw, window: w, tools: []*schema.ToolInfo{{Name: "read_tool_result"}}}
+	user := currentContextMessage()
+	user.Content = strings.Repeat("巡", 130000)
+	first := schema.ToolMessage(strings.Repeat("sample ", 4000), "first")
+	first.ToolName = "query_devices"
+	id := "00000000-0000-4000-8000-000000000001"
+	w.liveResults.byPosition = map[int]aiops.ArchivedToolReference{1: {ResultID: id, ToolName: first.ToolName}}
+	old := schema.UserMessage(strings.Repeat("prior notes ", 160))
+	in := []*schema.Message{old, schema.AssistantMessage("Noted.", nil), user,
+		makeAssistantToolCall("", "first", "query_devices", "{}"), first,
+		makeAssistantToolCall("", "latest", "get_host_summary", "{}"), schema.ToolMessage("fresh sample", "latest"),
+	}
+	view, _, u, err := m.prepare(t.Context(), in, nil)
+	if err != nil || w.historyCut != 0 || w.stepCut != 2 || view[0] != old || view[len(view)-1] != in[len(in)-1] || !strings.Contains(w.stepSummary, id) || raw.st.generateCalls.Load() != 1 || u.Estimated >= u.InputBudget || u.Status != "deferred" || u.Before <= u.After || u.After != u.Estimated {
+		t.Fatalf("live cut=%d history cut=%d usage=%+v err=%v", w.stepCut, w.historyCut, u, err)
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	einotool "github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
@@ -15,6 +16,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
+	aiops "github.com/ongridio/ongrid/internal/manager/model/aiops"
 	"github.com/ongridio/ongrid/internal/pkg/toolcapture"
 	"github.com/ongridio/ongrid/internal/pkg/tracing"
 )
@@ -340,7 +342,8 @@ func (a *einoToolAdapter) resolveInfo(ctx context.Context) {
 	a.infoOnce.Do(func() {
 		if info, err := a.inner.Info(ctx); err == nil && info != nil {
 			a.cacheName = info.Name
-			a.cacheable = info.Class == "read"
+			// The archive index grows after each batch or committed checkpoint.
+			a.cacheable = info.Class == "read" && info.Name != "read_archived_chat"
 		}
 	})
 }
@@ -408,14 +411,17 @@ func (a *einoToolAdapter) InvokableRun(ctx context.Context, argumentsInJSON stri
 	// ToolsNode callback. The latter may omit Tool.OnEnd, leaving a valid tool
 	// execution represented as an auto-healed failure in chat history.
 	ctx = toolcapture.WithState(ctx)
+	a.resolveInfo(ctx)
+	if a.cacheName == "read_archived_chat" {
+		ctx = context.WithValue(ctx, liveResultsKey{}, a.liveResults)
+	}
 	if a.liveResults != nil {
 		defer func() {
 			if id := toolcapture.ResultID(ctx); id != "" {
-				a.liveResults.pending.Store(compose.GetToolCallID(ctx), id)
+				a.liveResults.pending.Store(compose.GetToolCallID(ctx), aiops.ArchivedToolReference{ResultID: id, ToolName: a.cacheName, CreatedAt: time.Now().UTC()})
 			}
 		}()
 	}
-	a.resolveInfo(ctx)
 	resolved := einotool.GetImplSpecificOptions(&einoInvokeOptKey{}, opts...)
 	sink := a.persistence
 	if sink == nil {

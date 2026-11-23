@@ -53,30 +53,62 @@ type ContextWindow struct {
 // Call IDs can repeat across steps, so they are used only within the last batch.
 type liveToolResults struct {
 	pending    sync.Map
-	byPosition map[int]string
+	byPosition map[int]aiops.ArchivedToolReference
 }
 
 func (r *liveToolResults) bind(body []*schema.Message) {
 	for i := len(body) - 1; i >= 0 && body[i].Role == schema.Tool; i-- {
-		if id, ok := r.pending.LoadAndDelete(body[i].ToolCallID); ok {
+		if ref, ok := r.pending.LoadAndDelete(body[i].ToolCallID); ok {
 			if r.byPosition == nil {
-				r.byPosition = make(map[int]string)
+				r.byPosition = make(map[int]aiops.ArchivedToolReference)
 			}
-			r.byPosition[i] = id.(string)
+			r.byPosition[i] = ref.(aiops.ArchivedToolReference)
 		}
 	}
+}
+
+type liveResultsKey struct{}
+
+// CurrentToolResults pages completed steps of this graph invocation in message order.
+// bind runs between model steps, after every parallel tool in the batch has returned.
+func CurrentToolResults(ctx context.Context, name string, offset int) (aiops.ArchivedToolPage, error) {
+	page := aiops.ArchivedToolPage{Results: []aiops.ArchivedToolReference{}}
+	if offset < 0 || offset > 100_000_000 {
+		return page, fmt.Errorf("invalid result offset")
+	}
+	r, _ := ctx.Value(liveResultsKey{}).(*liveToolResults)
+	if r == nil {
+		return page, nil
+	}
+	start := offset
+	for _, pos := range slices.Sorted(maps.Keys(r.byPosition)) {
+		ref := r.byPosition[pos]
+		if name != "" && ref.ToolName != name {
+			continue
+		}
+		if offset > 0 {
+			offset--
+			continue
+		}
+		if len(page.Results) == 16 {
+			page.Next = start + len(page.Results)
+			break
+		}
+		page.Results = append(page.Results, ref)
+	}
+	return page, nil
 }
 
 func (r *liveToolResults) forSummary(part []*schema.Message, start int) []*schema.Message {
 	quoted := slices.Clone(part)
 	for i, msg := range quoted {
-		if id := r.byPosition[start+i]; id != "" {
+		if ref, ok := r.byPosition[start+i]; ok {
 			copy := *msg
 			copy.Extra = maps.Clone(msg.Extra)
 			if copy.Extra == nil {
 				copy.Extra = make(map[string]any)
 			}
-			copy.Extra["result_id"] = id
+			copy.Extra["result_id"] = ref.ResultID
 			quoted[i] = &copy
 		}
 	}
@@ -364,28 +396,33 @@ func (m *windowModel) prepare(ctx context.Context, in []*schema.Message, opts []
 		if attempt != w.lastAttempt {
 			w.lastAttempt = attempt
 
-			err = m.compact(ctx, hist, &w.historyCut, &w.Summary, true, &u, out, opts, count)
+			canRead := slices.ContainsFunc(tools, func(t *schema.ToolInfo) bool { return t != nil && t.Name == "read_tool_result" })
+			err = m.compact(ctx, hist, &w.historyCut, &w.Summary, true, false, &u, out, opts, count)
 			msgs = view()
 			shrink()
-			if err == nil && u.Estimated >= threshold {
-				err = m.compact(ctx, body, &w.stepCut, &w.stepSummary, false, &u, out, opts, count)
+			if ctx.Err() == nil && u.Estimated >= threshold {
+				stepErr := m.compact(ctx, body, &w.stepCut, &w.stepSummary, false, canRead, &u, out, opts, count)
+				err = errors.Join(err, stepErr)
 				msgs = view()
 				shrink()
 			}
 			if err != nil {
 				u.Status = "deferred"
 				slog.WarnContext(ctx, "context compaction deferred", "session_id", w.SessionID, "revision", w.Revision, "model", w.Model, "error_type", fmt.Sprintf("%T", err))
-			} else if w.LastBefore == before {
+			} else if u.Estimated < before {
 				u.Status = "compacted"
 			} else {
 				u.Status = "ready"
 			}
 		}
 	}
-	if u.Estimated < initial && (u.Status == "ready" || u.Status == "compacted") {
+	if u.Estimated < initial {
 		w.LastBefore = initial
 		w.LastAfter = u.Estimated
-		u.Status = "compacted"
+		// A deferred checkpoint can coexist with a smaller live input.
+		if u.Status != "deferred" {
+			u.Status = "compacted"
+		}
 		u.Before = initial
 		u.After = u.Estimated
 	}
@@ -406,7 +443,7 @@ func (m *windowModel) prepare(ctx context.Context, in []*schema.Message, opts []
 	return msgs, append(opts, model.WithMaxTokens(out)), u, nil
 }
 
-func (m *windowModel) compact(ctx context.Context, part []*schema.Message, offset *int, previous *string, historical bool, u *aiops.ContextUsage, out int, opts []model.Option, count func(*schema.Message) int) error {
+func (m *windowModel) compact(ctx context.Context, part []*schema.Message, offset *int, previous *string, historical, canRead bool, u *aiops.ContextUsage, out int, opts []model.Option, count func(*schema.Message) int) error {
 	w := m.window
 	before := u.Estimated
 	budget := u.InputBudget
@@ -471,8 +508,24 @@ func (m *windowModel) compact(ctx context.Context, part []*schema.Message, offse
 	if !historical {
 		batch = w.liveResults.forSummary(batch, *offset)
 	}
-	next, e := m.summarize(ctx, priorNotes, batch, budget, out, opts)
+	removed := before - remaining
+	if *previous != "" {
+		removed += count(summaryMessage(*previous))
+	}
+	var next string
+	var e error
 	mode := "summary"
+	if canRead && !historical {
+		if notes, ok := storedStepNotes(priorNotes, batch); ok {
+			candidate := withResultReferences(notes, priorRefs, batch)
+			if cost := count(summaryMessage(candidate)); cost < removed && cost <= min(2048, budget/3) {
+				next, mode = candidate, "references"
+			}
+		}
+	}
+	if mode == "summary" {
+		next, e = m.summarize(ctx, priorNotes, batch, budget, out, opts)
+	}
 	if e != nil {
 		// A live tool step has no durable replay cursor. Only fall back for
 		// persisted turns, and only when the model could not finish valid notes.
@@ -492,22 +545,17 @@ func (m *windowModel) compact(ctx context.Context, part []*schema.Message, offse
 		}
 		slog.WarnContext(ctx, "using archived excerpts for context compaction", "model", w.Model, "reason", reason)
 	}
-	next = withResultReferences(next, priorRefs, batch)
-	freed := 0
-	for _, v := range part[*offset:cut] {
-		freed += count(savedView(v))
+	if mode != "references" {
+		next = withResultReferences(next, priorRefs, batch)
 	}
-	if count(summaryMessage(next)) >= freed+llm.EstimateText(*previous) || llm.EstimateText(next) > budget/3 {
+	after := before - removed + count(summaryMessage(next))
+	if after >= before || llm.EstimateText(next) > budget/3 {
 		return fmt.Errorf("summary did not release space")
 	}
 	if historical && w.Save != nil {
 		boundary := ""
 		if cut < len(part) {
 			boundary, _ = part[cut].Extra["context_row"].(string)
-		}
-		after := before - freed + count(summaryMessage(next))
-		if *previous != "" {
-			after -= count(summaryMessage(*previous))
 		}
 		saved := aiops.ContextCompaction{Mode: mode, SavedAt: time.Now().UTC(), Before: before, After: after}
 		if e = w.Save(ctx, boundary, next, saved); e != nil {
@@ -518,7 +566,7 @@ func (m *windowModel) compact(ctx context.Context, part []*schema.Message, offse
 		u.LastCompaction = &saved
 	}
 	if !historical {
-		slog.InfoContext(ctx, "compacted current-turn tool steps", "session_id", w.SessionID, "window", u.Window, "from_message", *offset, "to_message", cut)
+		slog.InfoContext(ctx, "compacted current-turn tool steps", "session_id", w.SessionID, "window", u.Window, "from_message", *offset, "to_message", cut, "mode", mode, "before", before, "after", after)
 	}
 	*previous = next
 	*offset = cut

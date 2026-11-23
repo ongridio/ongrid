@@ -22,6 +22,7 @@ import (
 	"github.com/google/uuid"
 	openai "github.com/sashabaranov/go-openai"
 
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	"github.com/ongridio/ongrid/internal/pkg/llm"
 )
 
@@ -153,6 +154,57 @@ func withResultReferences(notes, previous string, messages []*schema.Message) st
 	// machine-written index at the end for the next compaction.
 	notes = strings.ReplaceAll(notes, resultReferenceHeader, "\nTool evidence:\n")
 	return notes + resultReferenceHeader + strings.Join(refs, "\n")
+}
+
+// A completed, captured step can use a short working note. Preserve the
+// assistant's public decisions and exact call arguments, paired with the stored
+// result even when a provider reuses a call ID in a later batch.
+func storedStepNotes(previous string, batch []*schema.Message) (string, bool) {
+	var notes strings.Builder
+	notes.WriteString(previous)
+	var calls map[string]schema.ToolCall
+	for _, msg := range batch {
+		switch msg.Role {
+		case schema.Assistant:
+			calls = make(map[string]schema.ToolCall, len(msg.ToolCalls))
+			for _, call := range msg.ToolCalls {
+				calls[call.ID] = call
+			}
+			if msg.Content != "" {
+				fmt.Fprintf(&notes, "\nAssistant: %q", msg.Content)
+			}
+		case schema.Tool:
+			id, _ := msg.Extra["result_id"].(string)
+			call, ok := calls[msg.ToolCallID]
+			if !ok || uuid.Validate(id) != nil {
+				return "", false
+			}
+			var stored struct {
+				Kind    string
+				ID      string `json:"result_id"`
+				Capture string `json:"capture_status"`
+				Storage string `json:"storage_status"`
+				Preview string
+			}
+			sample := msg.Content
+			if json.Unmarshal([]byte(sample), &stored) == nil && stored.Kind == "tool_result" {
+				if stored.ID != id || stored.Capture != "complete" || stored.Storage != "ready" {
+					return "", false
+				}
+				sample = stored.Preview
+			}
+			if status, _ := basetool.ResultOutcome(msg.Content); status != "success" {
+				return "", false
+			}
+			fmt.Fprintf(&notes, "\n%s(%s) [%s] excerpt: %q", call.Function.Name, call.Function.Arguments, id, excerptText(sample, 180))
+		default:
+			return "", false
+		}
+		if notes.Len() > 8192 {
+			return "", false
+		}
+	}
+	return notes.String(), true
 }
 
 func archivedExcerpts(previous string, messages []*schema.Message, limit int) (string, bool) {
