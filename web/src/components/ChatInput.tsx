@@ -24,6 +24,8 @@ import { isImeComposing } from '@/lib/keyboard';
 import type { IconType } from '@/lib/icon';
 import {
   searchMentions,
+  chatMessageBody,
+  MAX_CHAT_BODY_BYTES,
   type Mention,
   type MentionItem,
   type MentionType,
@@ -94,7 +96,7 @@ export function ChatInput({
   onWebSearchToggle,
   allowAttachments = false,
 }: Props) {
-  const { tr } = useI18n();
+  const { tr, locale } = useI18n();
   const effectivePlaceholder = placeholder ?? tr('从任何想法开始… 输入 @ 可调出设备/资源 · Shift+Enter 换行', 'Start anywhere… type @ for devices/resources · Shift+Enter for newline');
   const [internal, setInternal] = useState('');
   const value = controlled ?? internal;
@@ -255,6 +257,19 @@ export function ChatInput({
     setChips((prev) => prev.filter((_, i) => i !== idx));
   }
 
+  function fitsMessageBudget(content: string, imageCount: number) {
+    const body = chatMessageBody(content.trim(), {
+      provider: selectedModel?.provider, model: selectedModel?.model,
+      reasoning_effort: selectedModel?.reasoning_effort, locale, mentions: chips,
+      webSearchEnabled,
+      // Uploaded attachments use UUIDs. Include their wire size before uploading.
+      attachmentIds: Array<string>(imageCount).fill('00000000-0000-0000-0000-000000000000'),
+    });
+    if (new TextEncoder().encode(JSON.stringify(body)).byteLength <= MAX_CHAT_BODY_BYTES) return true;
+    setAttachmentError(tr('消息超过 1 MiB，请减少文件或拆分发送。', 'Message exceeds 1 MiB. Remove files or split the message.'));
+    return false;
+  }
+
   async function addFiles(files: File[]) {
     if (disabled || readingFile || !files.length) return;
     setAttachmentError('');
@@ -288,6 +303,10 @@ export function ChatInput({
       return;
     }
 
+    if (documents.reduce((bytes, file) => bytes + file.size, 0) > MAX_CHAT_BODY_BYTES) {
+      setAttachmentError(tr('文本文件合计超过 1 MiB，请分批添加。', 'Text files exceed 1 MiB in total. Add fewer files at once.'));
+      return;
+    }
     setReadingFile(true);
     try {
       const sections: string[] = [];
@@ -301,12 +320,14 @@ export function ChatInput({
       }
       const input = ref.current;
       if (!input) return;
+      const content = [input.value, ...sections].filter(Boolean).join('\n\n');
+      if (!fitsMessageBudget(content, attachments.length + images.length)) return;
       if (images.length) {
         const previews = images.map(file => ({ file, previewURL: URL.createObjectURL(file) }));
         setAttachments(prev => [...prev, ...previews]);
       }
       if (sections.length) {
-        setValue([input.value, ...sections].filter(Boolean).join('\n\n'));
+        setValue(content);
         input.focus();
       }
     } catch {
@@ -319,6 +340,7 @@ export function ChatInput({
   const submit = () => {
     const trimmed = value.trim();
     if ((!trimmed && attachments.length === 0) || disabled || readingFile) return;
+    if (!fitsMessageBudget(trimmed, attachments.length)) return;
     onSubmit({ text: trimmed, mentions: chips, attachments: attachments.map((item) => item.file) });
     if (controlled === undefined) setInternal('');
     setChips([]);

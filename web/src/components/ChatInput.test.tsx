@@ -203,3 +203,31 @@ it('loads experts when opened and adds the selected expert to the unsent draft',
     list.mockRestore();
   }
 });
+
+it('retains the draft and ignores a mixed selection when its serialized message exceeds 1 MiB', async () => {
+  const onSubmit = vi.fn();
+  render(<MemoryRouter><ChatInput allowAttachments onSubmit={onSubmit} /></MemoryRouter>);
+  const draft = screen.getByRole('textbox');
+  fireEvent.change(draft, { target: { value: 'Inspect logs' } });
+  const data = new TextEncoder().encode('a'.repeat(128 * 1024));
+  const logs = Array.from({ length: 8 }, (_, i) => {
+    const file = new File([data], i + '.log');
+    file.arrayBuffer = async () => data.buffer;
+    return file;
+  });
+  const image = new File(['image'], 'chart.png', { type: 'image/png' });
+  fireEvent.change(screen.getByLabelText('Choose files'), { target: { files: [...logs, image] } });
+  expect(await screen.findByRole('alert')).toHaveTextContent('1 MiB');
+  expect(draft).toHaveValue('Inspect logs');
+  expect(screen.queryByAltText('chart.png')).toBeNull();
+
+  // UTF-8 bytes and JSON escapes can exceed the limit after editing too.
+  const escaped = '巡"'.repeat(215000);
+  fireEvent.change(draft, { target: { value: escaped } });
+  fireEvent.keyDown(draft, { key: 'Enter' });
+  expect(onSubmit).not.toHaveBeenCalled();
+  expect(draft).toHaveValue(escaped);
+  fireEvent.change(draft, { target: { value: 'Send separately' } });
+  fireEvent.keyDown(draft, { key: 'Enter' });
+  expect(onSubmit).toHaveBeenCalledWith({ text: 'Send separately', mentions: [], attachments: [] });
+});

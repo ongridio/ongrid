@@ -221,7 +221,10 @@ export type SendOptions = {
   locale?: string;
 };
 
-export function postMessage(sessionId: string | number, content: string, opts: SendOptions = {}) {
+// Match the Manager's maxMessageBodyBytes, including JSON escaping and options.
+export const MAX_CHAT_BODY_BYTES = 1024 * 1024;
+
+export function chatMessageBody(content: string, opts: SendOptions) {
   const body: Record<string, unknown> = { content };
   if (opts.provider) body.provider = opts.provider;
   if (opts.model) body.model = opts.model;
@@ -230,6 +233,11 @@ export function postMessage(sessionId: string | number, content: string, opts: S
   if (opts.webSearchEnabled) body.web_search_enabled = true;
   if (opts.locale) body.locale = opts.locale;
   if (opts.attachmentIds && opts.attachmentIds.length > 0) body.attachment_ids = opts.attachmentIds;
+  return body;
+}
+
+export function postMessage(sessionId: string | number, content: string, opts: SendOptions = {}) {
+  const body = chatMessageBody(content, opts);
   return request<PostMessageResponse>(
     'POST',
     `/chat/sessions/${encodeURIComponent(String(sessionId))}/messages`,
@@ -376,19 +384,10 @@ export async function streamMessage(
   const token = getToken();
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
-  const body: Record<string, unknown> = { content };
-  if (opts.provider) body.provider = opts.provider;
-  if (opts.model) body.model = opts.model;
-  if (opts.reasoning_effort !== undefined) body.reasoning_effort = chatReasoningEffort(opts.reasoning_effort);
-  if (opts.mentions && opts.mentions.length > 0) body.mentions = opts.mentions;
-  if (opts.webSearchEnabled) body.web_search_enabled = true;
-  if (opts.locale) body.locale = opts.locale;
-  if (opts.attachmentIds && opts.attachmentIds.length > 0) body.attachment_ids = opts.attachmentIds;
-
   const res = await fetch(url, {
     method: 'POST',
     headers,
-    body: JSON.stringify(body),
+    body: JSON.stringify(chatMessageBody(content, opts)),
     signal,
   });
 
