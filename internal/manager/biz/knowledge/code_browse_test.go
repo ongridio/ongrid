@@ -29,7 +29,7 @@ func (f *fakeRepoStore) CreateRepo(context.Context, *model.Repository) error { r
 func (f *fakeRepoStore) UpdateRepoSync(context.Context, uint64, int, string, string) error {
 	return nil
 }
-func (f *fakeRepoStore) UpdateRepo(context.Context, uint64, string, string) error  { return nil }
+func (f *fakeRepoStore) UpdateRepo(context.Context, *model.Repository, bool) error { return nil }
 func (f *fakeRepoStore) UpdateRepoSource(context.Context, *model.Repository) error { return nil }
 func (f *fakeRepoStore) DeleteRepo(context.Context, uint64) error                  { return nil }
 func (f *fakeRepoStore) ListSSHIdentities(context.Context) ([]*model.SSHIdentity, error) {

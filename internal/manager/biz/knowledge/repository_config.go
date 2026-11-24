@@ -14,8 +14,15 @@ import (
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 )
 
+type UpdateRepoInput struct {
+	Branch                  string
+	Description             string
+	AutoSyncEnabled         *bool
+	AutoSyncIntervalMinutes *int32
+}
+
 // UpdateRepo preserves repository identity and all mirrored source history.
-func (u *Usecase) UpdateRepo(ctx context.Context, id uint64, branch, description string) (*model.Repository, error) {
+func (u *Usecase) UpdateRepo(ctx context.Context, id uint64, in UpdateRepoInput) (*model.Repository, error) {
 	if _, busy := u.active.LoadOrStore(id, true); busy {
 		return nil, fmt.Errorf("%w: repository syncing; retry after sync completes", errs.ErrConflict)
 	}
@@ -30,14 +37,27 @@ func (u *Usecase) UpdateRepo(ctx context.Context, id uint64, branch, description
 	if err != nil {
 		return nil, err
 	}
-	branch, description = strings.TrimSpace(branch), strings.TrimSpace(description)
+	branch, description := strings.TrimSpace(in.Branch), strings.TrimSpace(in.Description)
 	if len(description) > 512 {
 		return nil, fmt.Errorf("%w: description exceeds 512 bytes", errs.ErrInvalid)
 	}
-	if err := u.validateRepository(ctx, repo.URL, branch); err != nil {
-		return nil, err
+	if in.AutoSyncIntervalMinutes != nil {
+		if *in.AutoSyncIntervalMinutes < 1 {
+			return nil, fmt.Errorf("%w: auto-sync interval must be a positive number of minutes", errs.ErrInvalid)
+		}
+		repo.AutoSyncIntervalMinutes = *in.AutoSyncIntervalMinutes
 	}
-	if err := u.repo.UpdateRepo(ctx, id, branch, description); err != nil {
+	if in.AutoSyncEnabled != nil {
+		repo.AutoSyncEnabled = *in.AutoSyncEnabled
+	}
+	refChanged := repo.Branch != branch
+	if refChanged {
+		if err := u.validateRepository(ctx, repo.URL, branch); err != nil {
+			return nil, err
+		}
+	}
+	repo.Branch, repo.Description = branch, description
+	if err := u.repo.UpdateRepo(ctx, repo, refChanged); err != nil {
 		return nil, fmt.Errorf("knowledge: update repo: %w", err)
 	}
 	return u.repo.GetRepo(ctx, id)

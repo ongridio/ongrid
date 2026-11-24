@@ -99,11 +99,47 @@ describe('Repository cards and SSH summary', () => {
     );
     render(<MemoryRouter><KnowledgeRepos /></MemoryRouter>);
     fireEvent.click((await screen.findAllByRole('button', { name: '添加仓库' }))[0]);
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('仓库 URL *'), { target: { value: 'https://example/private.git' } });
     fireEvent.click(screen.getByRole('button', { name: '验证并保存' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('repository access denied');
     expect(screen.getByLabelText('仓库 URL *')).toHaveValue('https://example/private.git');
     expect(screen.queryByText('保存（保存后再点同步）')).not.toBeInTheDocument();
+  });
+
+  it('configures a schedule only in the editor and retains the interval when disabled', async () => {
+    const repo = { id: 7, url: 'https://example/widget.git', branch: 'main', auto_sync_enabled: false, auto_sync_interval_minutes: 30 };
+    server.use(
+      http.get('/api/v1/knowledge/repos', () => HttpResponse.json({ items: [repo] })),
+      http.get('/api/v1/knowledge/ssh-identities', () => HttpResponse.json({ items: [] })),
+      http.patch('/api/v1/knowledge/repos/7', async ({ request }) => {
+        Object.assign(repo, await request.json());
+        return HttpResponse.json(repo);
+      }),
+    );
+    render(<MemoryRouter><KnowledgeRepos /></MemoryRouter>);
+    const edit = await screen.findByRole('button', { name: '编辑' });
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument();
+    fireEvent.click(edit);
+    expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('switch', { name: '自动同步' }));
+    const interval = screen.getByRole('spinbutton', { name: '同步间隔（分钟）' });
+    expect(interval).toHaveValue(30);
+    for (const value of ['', '0', '0.5', '-1']) {
+      fireEvent.change(interval, { target: { value } });
+      expect(screen.getByRole('button', { name: '保存' })).toBeDisabled();
+    }
+    fireEvent.change(interval, { target: { value: '45' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(repo).toMatchObject({ auto_sync_enabled: true, auto_sync_interval_minutes: 45 });
+    fireEvent.click(edit);
+    expect(screen.getByRole('spinbutton')).toHaveValue(45);
+    fireEvent.click(screen.getByRole('switch'));
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(repo).toMatchObject({ auto_sync_enabled: false, auto_sync_interval_minutes: 45 });
+    expect(screen.getByRole('button', { name: '同步' })).toBeEnabled();
   });
 
 });

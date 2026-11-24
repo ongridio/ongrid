@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -17,6 +18,52 @@ import (
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 	"gorm.io/gorm"
 )
+
+func newSyncDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "test.db")), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	if err := store.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	return db
+}
+
+func TestFailedInitialSyncRespectsDisabledSchedule(t *testing.T) {
+	repos := store.New(newSyncDB(t))
+	ctx := context.Background()
+	row := &model.Repository{URL: "https://example.test/docs.git", Branch: "main"}
+	if err := repos.CreateRepo(ctx, row); err != nil {
+		t.Fatal(err)
+	}
+	cloneDir := filepath.Join(t.TempDir(), "regular-file")
+	if err := os.WriteFile(cloneDir, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	u := &Usecase{repo: repos, cloneDir: cloneDir, log: slog.Default()}
+	u.syncDueRepos(ctx)
+	failed, err := repos.GetRepo(ctx, row.ID)
+	if err != nil || failed.LastSyncError == "" || repoSyncDue(failed) {
+		t.Fatalf("failed initial sync still due: %+v %v", failed, err)
+	}
+	expired, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
+	defer cancel()
+	_, err = u.recordSyncFailure(expired, row, context.DeadlineExceeded)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("lost sync timeout: %v", err)
+	}
+	failed, err = repos.GetRepo(ctx, row.ID)
+	if err != nil || failed.LastSyncError != context.DeadlineExceeded.Error() || repoSyncDue(failed) {
+		t.Fatalf("sync timeout was not recorded: %+v %v", failed, err)
+	}
+}
 
 func TestAutoSyncCreatesSnapshotAndSkipsUnchangedIndex(t *testing.T) {
 	fixture, _ := newCodeBrowseUC(t)
@@ -31,18 +78,7 @@ func TestAutoSyncCreatesSnapshotAndSkipsUnchangedIndex(t *testing.T) {
 	git("update-server-info")
 	remoteHTTP := httptest.NewServer(http.FileServer(http.Dir(filepath.Join(remote, ".git"))))
 	defer remoteHTTP.Close()
-	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "test.db")), &gorm.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer sqlDB.Close()
-	if err := store.Migrate(db); err != nil {
-		t.Fatal(err)
-	}
+	db := newSyncDB(t)
 	repoStore := store.New(db)
 	vec := &fakeVec{}
 	u, err := New(context.Background(), repoStore, vec, fakeEmbed{}, t.TempDir(), slog.Default())
@@ -109,7 +145,35 @@ func TestAutoSyncCreatesSnapshotAndSkipsUnchangedIndex(t *testing.T) {
 	if unchanged.CommitCount != 1 {
 		t.Fatal("synced before interval elapsed")
 	}
-	if err := db.Model(&model.Repository{}).Where("id = ?", row.ID).Update("last_synced_at", time.Now().Add(-6*time.Minute)).Error; err != nil {
+	if row.AutoSyncEnabled || row.AutoSyncIntervalMinutes != 30 {
+		t.Fatalf("unexpected default schedule: %+v", row)
+	}
+	lastSync := time.Now().Add(-24 * time.Hour).UTC()
+	if err := db.Model(&model.Repository{}).Where("id = ?", row.ID).Update("last_synced_at", lastSync).Error; err != nil {
+		t.Fatal(err)
+	}
+	u.syncDueRepos(context.Background())
+	disabled, err := repoStore.GetRepo(context.Background(), row.ID)
+	if err != nil || disabled.CommitCount != 1 || !disabled.LastSyncedAt.Equal(lastSync) {
+		t.Fatalf("disabled schedule fetched: %+v %v", disabled, err)
+	}
+	enabled := true
+	minutes := int32(1500)
+	edit := UpdateRepoInput{Branch: row.Branch, AutoSyncEnabled: &enabled, AutoSyncIntervalMinutes: &minutes}
+	if _, err := u.UpdateRepo(context.Background(), row.ID, edit); err != nil {
+		t.Fatal(err)
+	}
+	u.syncDueRepos(context.Background())
+	waiting, err := repoStore.GetRepo(context.Background(), row.ID)
+	if err != nil || !waiting.LastSyncedAt.Equal(lastSync) || waiting.CommitCount != 1 {
+		t.Fatalf("configured interval ignored: %+v %v", waiting, err)
+	}
+	minutes = 0
+	if _, err := u.UpdateRepo(context.Background(), row.ID, edit); !errors.Is(err, errs.ErrInvalid) {
+		t.Fatalf("invalid interval accepted: %v", err)
+	}
+	minutes = 45
+	if _, err := u.UpdateRepo(context.Background(), row.ID, edit); err != nil {
 		t.Fatal(err)
 	}
 	u.syncDueRepos(context.Background())
@@ -121,18 +185,18 @@ func TestAutoSyncCreatesSnapshotAndSkipsUnchangedIndex(t *testing.T) {
 		t.Fatalf("tag-only sync rebuilt index or wrong stats: %+v", updated)
 	}
 
-	if _, err := u.UpdateRepo(context.Background(), row.ID, "missing", "bad edit"); !errors.Is(err, errs.ErrInvalid) {
+	if _, err := u.UpdateRepo(context.Background(), row.ID, UpdateRepoInput{Branch: "missing", Description: "bad edit"}); !errors.Is(err, errs.ErrInvalid) {
 		t.Fatalf("invalid edit: %v", err)
 	}
 	preserved, err := repoStore.GetRepo(context.Background(), row.ID)
 	if err != nil || preserved.Branch != row.Branch || preserved.Description != row.Description || preserved.IndexedCommit != row.IndexedCommit || preserved.LastSyncedAt == nil || len(vec.upserts) != writes {
 		t.Fatalf("invalid edit changed data: %+v %v", preserved, err)
 	}
-	changed, err := u.UpdateRepo(context.Background(), row.ID, "new-release", "new index")
+	changed, err := u.UpdateRepo(context.Background(), row.ID, UpdateRepoInput{Branch: "new-release", Description: "new index"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if changed.ID != row.ID || changed.URL != row.URL || changed.LastSyncedAt != nil || changed.CommitCount != 2 {
+	if changed.ID != row.ID || changed.URL != row.URL || changed.LastSyncedAt != nil || changed.CommitCount != 2 || !changed.AutoSyncEnabled || changed.AutoSyncIntervalMinutes != 45 {
 		t.Fatalf("update lost identity/history or was not queued: %+v", changed)
 	}
 	u.syncDueRepos(context.Background())
@@ -141,7 +205,7 @@ func TestAutoSyncCreatesSnapshotAndSkipsUnchangedIndex(t *testing.T) {
 		t.Fatalf("new indexing ref not applied: %+v %v", changed, err)
 	}
 	u.active.Store(row.ID, true)
-	if _, err := u.UpdateRepo(context.Background(), row.ID, "indexed", ""); !errors.Is(err, errs.ErrConflict) {
+	if _, err := u.UpdateRepo(context.Background(), row.ID, UpdateRepoInput{Branch: "indexed"}); !errors.Is(err, errs.ErrConflict) {
 		t.Fatalf("parallel edit: %v", err)
 	}
 	if _, err := u.Sync(context.Background(), row.ID); !errors.Is(err, errs.ErrConflict) {
@@ -155,6 +219,18 @@ func TestAutoSyncCreatesSnapshotAndSkipsUnchangedIndex(t *testing.T) {
 		t.Fatalf("active flag: %v %v", listed, err)
 	}
 	u.active.Delete(row.ID)
+	// Disabling the schedule must work offline and keep the last attempt.
+	t.Run("disable without git", func(t *testing.T) {
+		t.Setenv("PATH", t.TempDir())
+		enabled := false
+		disabled, err := u.UpdateRepo(context.Background(), row.ID, UpdateRepoInput{Branch: changed.Branch, AutoSyncEnabled: &enabled})
+		if err != nil || disabled.AutoSyncEnabled || disabled.AutoSyncIntervalMinutes != minutes || !disabled.LastSyncedAt.Equal(*changed.LastSyncedAt) {
+			t.Fatalf("disable changed sync state: %+v %v", disabled, err)
+		}
+		if synced, err := u.syncRepo(context.Background(), row.ID, true); synced != nil || err != nil {
+			t.Fatalf("queued worker ignored disabled schedule: %+v %v", synced, err)
+		}
+	})
 	// Failed indexing must retry even if the checkout was already updated.
 	if err := db.Model(&model.Repository{}).Where("id = ?", row.ID).Update("indexed_commit", "").Error; err != nil {
 		t.Fatal(err)

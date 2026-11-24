@@ -55,7 +55,7 @@ type Service interface {
 
 	ListRepos(ctx context.Context) ([]*model.Repository, error)
 	CreateRepo(ctx context.Context, in biz.CreateRepoInput) (*model.Repository, error)
-	UpdateRepo(ctx context.Context, id uint64, branch, description string) (*model.Repository, error)
+	UpdateRepo(ctx context.Context, id uint64, in biz.UpdateRepoInput) (*model.Repository, error)
 	Sync(ctx context.Context, id uint64) (*model.Repository, error)
 	DeleteRepo(ctx context.Context, id uint64) error
 	// SyncBuiltinVault syncs the platform vault into qdrant (source_type=vault):
@@ -179,19 +179,21 @@ func toDocDTO(d *model.Doc, includeContent bool) docDTO {
 }
 
 type repoDTO struct {
-	ID              uint64     `json:"id"`
-	URL             string     `json:"url"`
-	Branch          string     `json:"branch"`
-	Description     string     `json:"description,omitempty"`
-	LastSyncedAt    *time.Time `json:"last_synced_at,omitempty"`
-	LastSyncError   string     `json:"last_sync_error,omitempty"`
-	FileCount       int        `json:"file_count"`
-	CommitCount     int        `json:"commit_count"`
-	TagCount        int        `json:"tag_count"`
-	BranchCount     int        `json:"branch_count"`
-	HistoryComplete bool       `json:"history_complete"`
-	SourceSyncedAt  *time.Time `json:"source_synced_at,omitempty"`
-	Syncing         bool       `json:"syncing"`
+	ID                      uint64     `json:"id"`
+	URL                     string     `json:"url"`
+	Branch                  string     `json:"branch"`
+	Description             string     `json:"description,omitempty"`
+	LastSyncedAt            *time.Time `json:"last_synced_at,omitempty"`
+	LastSyncError           string     `json:"last_sync_error,omitempty"`
+	FileCount               int        `json:"file_count"`
+	CommitCount             int        `json:"commit_count"`
+	TagCount                int        `json:"tag_count"`
+	BranchCount             int        `json:"branch_count"`
+	HistoryComplete         bool       `json:"history_complete"`
+	SourceSyncedAt          *time.Time `json:"source_synced_at,omitempty"`
+	Syncing                 bool       `json:"syncing"`
+	AutoSyncEnabled         bool       `json:"auto_sync_enabled"`
+	AutoSyncIntervalMinutes int32      `json:"auto_sync_interval_minutes"`
 	// IsBuiltin marks the embedded platform vault (url == builtin://vault).
 	// The frontend uses this to (a) hide it from the user-facing Repos list
 	// and (b) drive the Knowledge page's "同步内置知识库" sync button — so
@@ -204,22 +206,24 @@ type repoDTO struct {
 
 func toRepoDTO(r *model.Repository) repoDTO {
 	return repoDTO{
-		ID:              r.ID,
-		URL:             r.URL,
-		Branch:          r.Branch,
-		Description:     r.Description,
-		LastSyncedAt:    r.LastSyncedAt,
-		LastSyncError:   r.LastSyncError,
-		FileCount:       r.FileCount,
-		CommitCount:     r.CommitCount,
-		TagCount:        r.TagCount,
-		BranchCount:     r.BranchCount,
-		HistoryComplete: r.HistoryComplete,
-		SourceSyncedAt:  r.SourceSyncedAt,
-		Syncing:         r.Syncing,
-		IsBuiltin:       biz.IsBuiltinVaultURL(r.URL),
-		CreatedAt:       r.CreatedAt,
-		UpdatedAt:       r.UpdatedAt,
+		ID:                      r.ID,
+		URL:                     r.URL,
+		Branch:                  r.Branch,
+		Description:             r.Description,
+		LastSyncedAt:            r.LastSyncedAt,
+		LastSyncError:           r.LastSyncError,
+		FileCount:               r.FileCount,
+		CommitCount:             r.CommitCount,
+		TagCount:                r.TagCount,
+		BranchCount:             r.BranchCount,
+		HistoryComplete:         r.HistoryComplete,
+		SourceSyncedAt:          r.SourceSyncedAt,
+		Syncing:                 r.Syncing,
+		AutoSyncEnabled:         r.AutoSyncEnabled,
+		AutoSyncIntervalMinutes: r.AutoSyncIntervalMinutes,
+		IsBuiltin:               biz.IsBuiltinVaultURL(r.URL),
+		CreatedAt:               r.CreatedAt,
+		UpdatedAt:               r.UpdatedAt,
 	}
 }
 
@@ -629,8 +633,8 @@ func writeErr(w http.ResponseWriter, err error) {
 	}
 }
 
-// updateRepo edits the document indexing ref without changing repository identity.
-// @Summary Validate and update a repository indexing ref
+// updateRepo edits repository settings and validates changes to the indexing ref.
+// @Summary Update repository settings
 // @Router /v1/knowledge/repos/{id} [patch]
 // @Success 200 {object} repoDTO
 func (h *Handler) updateRepo(w http.ResponseWriter, r *http.Request) {
@@ -640,8 +644,10 @@ func (h *Handler) updateRepo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Branch      string `json:"branch"`
-		Description string `json:"description"`
+		Branch                  string `json:"branch"`
+		Description             string `json:"description"`
+		AutoSyncEnabled         *bool  `json:"auto_sync_enabled"`
+		AutoSyncIntervalMinutes *int32 `json:"auto_sync_interval_minutes"`
 	}
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
@@ -649,7 +655,10 @@ func (h *Handler) updateRepo(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, errors.Join(errs.ErrInvalid, err))
 		return
 	}
-	row, err := h.svc.UpdateRepo(r.Context(), id, req.Branch, req.Description)
+	row, err := h.svc.UpdateRepo(r.Context(), id, biz.UpdateRepoInput{
+		Branch: req.Branch, Description: req.Description,
+		AutoSyncEnabled: req.AutoSyncEnabled, AutoSyncIntervalMinutes: req.AutoSyncIntervalMinutes,
+	})
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -657,7 +666,7 @@ func (h *Handler) updateRepo(w http.ResponseWriter, r *http.Request) {
 	auditmw.SetAuditEvent(r, bizaudit.Event{
 		Action: auditmodel.ActionRepoUpdate, ResourceType: auditmodel.ResourceRepo,
 		ResourceID: strconv.FormatUint(id, 10), ResourceName: row.URL, Status: auditmodel.StatusSuccess,
-		Payload: map[string]any{"branch": row.Branch},
+		Payload: map[string]any{"branch": row.Branch, "auto_sync_enabled": row.AutoSyncEnabled, "auto_sync_interval_minutes": row.AutoSyncIntervalMinutes},
 	})
 	writeJSON(w, http.StatusOK, toRepoDTO(row))
 }
