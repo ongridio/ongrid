@@ -176,11 +176,17 @@ func (r *Repo) UpdateRepoSource(ctx context.Context, repo *model.Repository) err
 	}).Error
 }
 
-// UpdateRepo makes the new indexing ref due immediately; source history is kept.
-func (r *Repo) UpdateRepo(ctx context.Context, id uint64, branch, description string) error {
-	res := r.db.WithContext(ctx).Model(&model.Repository{}).Where("id = ?", id).Updates(map[string]any{
-		"branch": branch, "description": description, "last_synced_at": nil, "last_sync_error": "",
-	})
+// Only a change of indexing ref needs a new checkout.
+func (r *Repo) UpdateRepo(ctx context.Context, repo *model.Repository, refChanged bool) error {
+	fields := map[string]any{
+		"branch": repo.Branch, "description": repo.Description,
+		"auto_sync_enabled": repo.AutoSyncEnabled, "auto_sync_interval_minutes": repo.AutoSyncIntervalMinutes,
+	}
+	if refChanged {
+		fields["last_synced_at"] = nil
+		fields["last_sync_error"] = ""
+	}
+	res := r.db.WithContext(ctx).Model(repo).Updates(fields)
 	if res.Error != nil {
 		return res.Error
 	}

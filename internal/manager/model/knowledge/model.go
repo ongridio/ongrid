@@ -56,6 +56,9 @@ type Repository struct {
 	Syncing         bool `gorm:"-"`
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+
+	AutoSyncEnabled         bool  `gorm:"not null;default:false"`
+	AutoSyncIntervalMinutes int32 `gorm:"not null;default:30"`
 }
 
 // TableName pins the table name.

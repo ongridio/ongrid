@@ -1,7 +1,7 @@
 import { useAssistantPage } from '@/lib/assistantPage';
 import { usePermissions } from '@/store/me';
 import { EmptyStateCard } from '@/components/ui';
-import { Button, Label, Input, Textarea } from '@/components/ui';
+import { Button, Label, Input, Switch, Textarea } from '@/components/ui';
 import { useDialogs } from '@/components/ui/useDialogs';
 import { Hint } from '@/components/ui/Tooltip';
 // KnowledgeRepos page — add / sync / remove git repos. Each
@@ -170,8 +170,8 @@ export default function KnowledgeReposPage() {
             <h1 className="mt-1 text-base font-semibold text-zinc-100">{tr('代码仓库', 'Code repos')}</h1>
             <p className="mt-0.5 text-xs text-zinc-500">
               {tr(
-                '新增后自动同步，每 5 分钟检查更新；拉取全部分支、Tag 和完整历史。',
-                'Syncs automatically after adding, then checks every 5 minutes for all branches, tags and full history.',
+                '添加仓库后首次同步会拉取全部分支、Tag 和完整历史。',
+                'The first sync fetches all branches, tags and full history after you add a repository.',
               )}
             </p>
           </div>
@@ -310,7 +310,7 @@ function RepoCard({
         <summary className="w-fit cursor-pointer select-none rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-500">{tr('同步详情', 'Sync details')}
           <span className="ml-3 inline-flex items-center gap-1.5">
             <span aria-hidden className={cn('h-1.5 w-1.5 rounded-full', repo.last_sync_error ? 'bg-red-500' : repo.source_synced_at && repo.history_complete ? 'bg-emerald-500' : 'bg-zinc-500')} />
-            {syncing ? tr('同步中', 'Syncing') : repo.last_sync_error ? tr('同步失败，将自动重试', 'Sync failed; will retry automatically') : repo.source_synced_at && repo.history_complete ? tr('完整历史已同步', 'Full history synced') : tr('等待完整同步', 'Awaiting full sync')}
+            {syncing ? tr('同步中', 'Syncing') : repo.last_sync_error ? tr('上次同步失败', 'Last sync failed') : repo.source_synced_at && repo.history_complete ? tr('完整历史已同步', 'Full history synced') : tr('等待完整同步', 'Awaiting full sync')}
           </span>
         </summary>
         <div className="mt-3 space-y-2">
@@ -365,6 +365,11 @@ function RepoCreator({ repo, onClose, onCreated }: { repo?: KnowledgeRepo; onClo
   const [url, setUrl] = useState(repo?.url ?? '');
   const [branch, setBranch] = useState(repo?.branch ?? 'main');
   const [description, setDescription] = useState(repo?.description ?? '');
+  const [autoSync, setAutoSync] = useState(repo?.auto_sync_enabled ?? false);
+  const [intervalMinutes, setIntervalMinutes] = useState(String(repo?.auto_sync_interval_minutes ?? 30));
+  const minutes = Number(intervalMinutes);
+  const invalidInterval = autoSync && (!Number.isInteger(minutes) || minutes < 1 || minutes > 2147483647);
+  const verifyRef = !repo || (branch.trim() || 'main') !== repo.branch;
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -373,7 +378,11 @@ function RepoCreator({ repo, onClose, onCreated }: { repo?: KnowledgeRepo; onClo
     setErr(null);
     try {
       const input = { branch: branch.trim() || 'main', description: description.trim() };
-      if (repo) await updateRepo(repo.id, input);
+      if (repo) await updateRepo(repo.id, {
+        ...input,
+        auto_sync_enabled: autoSync !== (repo.auto_sync_enabled ?? false) ? autoSync : undefined,
+        auto_sync_interval_minutes: autoSync && minutes !== repo.auto_sync_interval_minutes ? minutes : undefined,
+      });
       else await createRepo({ url: url.trim(), ...input });
       onCreated();
     } catch (e) {
@@ -401,16 +410,18 @@ function RepoCreator({ repo, onClose, onCreated }: { repo?: KnowledgeRepo; onClo
           <Button variant="primary" size="sm"
             type="button"
             onClick={() => void submit()}
-            disabled={submitting || url.trim() === ''}
+            disabled={submitting || url.trim() === '' || invalidInterval}
             className="px-3 py-1.5 font-medium text-accent-fg"
           >
-            {submitting ? tr('验证并保存中…', 'Verifying and saving…') : tr('验证并保存', 'Verify and save')}
+            {submitting ? tr('保存中…', 'Saving…') : verifyRef ? tr('验证并保存', 'Verify and save') : tr('保存', 'Save')}
           </Button>
         </>
       }
     >
       <div className="space-y-3 text-xs text-zinc-300">
-        <p className="text-text-muted">{tr('保存前验证仓库访问权限与分支/Tag，成功后自动同步并更新文档索引。完整拉取结果可在仓库卡片查看。', 'Access and branch/tag are verified before saving. Sync and document indexing then run automatically; the card shows the full fetch result.')}</p>
+        <p className="text-text-muted">{repo
+          ? tr('修改索引分支或 Tag 后，系统会验证并同步一次。', 'Changing the indexing branch or tag verifies the new ref and triggers one sync.')
+          : tr('保存前验证仓库访问权限与分支/Tag，成功后自动同步并更新文档索引。完整拉取结果可在仓库卡片查看。', 'Access and branch/tag are verified before saving. Sync and document indexing then run automatically; the card shows the full fetch result.')}</p>
         {err && <div role="alert" className="whitespace-pre-wrap break-words rounded-md border border-red-500/40 bg-red-500/5 px-3 py-2 text-red-300">{gitErrorHint(err, url, tr) || tr('验证或保存失败，请检查仓库地址、凭证和分支/Tag。', 'Verification or saving failed. Check the repository URL, credentials and branch/tag.')}<div className="mt-1">{err}</div></div>}
         <Label className="block">
           <div className="mb-1 text-[11px] text-zinc-500">{tr('仓库 URL *', 'Repo URL *')}</div>
@@ -457,6 +468,19 @@ function RepoCreator({ repo, onClose, onCreated }: { repo?: KnowledgeRepo; onClo
             className="w-full"
           />
         </Label>
+        {repo?.auto_sync_enabled !== undefined && <>
+          <div className="flex items-center justify-between gap-3">
+            <Label htmlFor="repo-auto-sync">{tr('自动同步', 'Automatic sync')}</Label>
+            <Switch id="repo-auto-sync" checked={autoSync} onCheckedChange={setAutoSync} disabled={submitting} />
+          </div>
+          {autoSync && <div>
+            <Label htmlFor="repo-sync-interval" className="mb-1 block text-[11px] text-zinc-500">{tr('同步间隔（分钟）', 'Sync interval (minutes)')}</Label>
+            <Input id="repo-sync-interval" type="number" value={intervalMinutes} min={1} max={2147483647} step={1}
+              aria-invalid={invalidInterval} aria-describedby={invalidInterval ? 'repo-interval-error' : undefined} disabled={submitting} className="w-full"
+              onChange={(e) => setIntervalMinutes(e.target.value)} />
+            {invalidInterval && <span id="repo-interval-error" className="mt-1 block text-red-400">{tr('请输入有效的正整数分钟数，例如 30。', 'Enter a positive whole number of minutes, such as 30.')}</span>}
+          </div>}
+        </>}
         <div className="rounded-md border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-[11px] text-zinc-500">
           {tr('仅索引：', 'Indexed only: ')}<span className="font-mono">.md / .txt / .rst / .yaml / .yml / .toml / .json</span>
           {tr('；忽略 ', '; ignored: ')}<span className="font-mono">.git / vendor / node_modules / dist / build</span>

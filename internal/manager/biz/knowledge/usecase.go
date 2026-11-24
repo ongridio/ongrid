@@ -50,7 +50,7 @@ type RepoStore interface {
 	CreateRepo(ctx context.Context, repo *model.Repository) error
 	UpdateRepoSync(ctx context.Context, id uint64, fileCount int, syncErr string, indexedCommit string) error
 	UpdateRepoSource(ctx context.Context, repo *model.Repository) error
-	UpdateRepo(ctx context.Context, id uint64, branch, description string) error
+	UpdateRepo(ctx context.Context, repo *model.Repository, refChanged bool) error
 	DeleteRepo(ctx context.Context, id uint64) error
 
 	// SSH identities — managed in the same data layer for
@@ -953,6 +953,10 @@ func (u *Usecase) DeleteRepo(ctx context.Context, id uint64) error {
 // walks the tree for indexable files, embeds them, and replaces the
 // qdrant point set for repo_id=id. Synchronous.
 func (u *Usecase) Sync(ctx context.Context, id uint64) (*model.Repository, error) {
+	return u.syncRepo(ctx, id, false)
+}
+
+func (u *Usecase) syncRepo(ctx context.Context, id uint64, onlyIfDue bool) (*model.Repository, error) {
 	if _, busy := u.active.LoadOrStore(id, true); busy {
 		return nil, fmt.Errorf("%w: repository syncing", errs.ErrConflict)
 	}
@@ -963,10 +967,14 @@ func (u *Usecase) Sync(ctx context.Context, id uint64) (*model.Repository, error
 	if err != nil {
 		return nil, err
 	}
+	// The schedule or last attempt may have changed since the worker listed this repo.
+	if onlyIfDue && !repoSyncDue(repo) {
+		return nil, nil
+	}
 	dir := u.repoDir(id)
 	indexedCommit := ""
 	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
-		return nil, fmt.Errorf("knowledge: mkdir parent: %w", err)
+		return u.recordSyncFailure(ctx, repo, fmt.Errorf("knowledge: mkdir parent: %w", err))
 	}
 
 	// The built-in vault ships embedded in the binary, so its "sync" is
@@ -1044,7 +1052,7 @@ func (u *Usecase) Sync(ctx context.Context, id uint64) (*model.Repository, error
 			return u.recordSyncFailure(ctx, repo, err)
 		}
 		if err := u.repo.UpdateRepoSource(ctx, repo); err != nil {
-			return nil, fmt.Errorf("knowledge: save source stats: %w", err)
+			return u.recordSyncFailure(ctx, repo, fmt.Errorf("knowledge: save source stats: %w", err))
 		}
 		newHead, err := runGit(ctx, dir, nil, "rev-parse", "HEAD")
 		if err != nil {
@@ -1456,7 +1464,11 @@ func (u *Usecase) upsertDoc(ctx context.Context, d *model.Doc) error {
 
 func (u *Usecase) recordSyncFailure(ctx context.Context, repo *model.Repository, syncErr error) (*model.Repository, error) {
 	u.log.Warn("knowledge: sync failed", slog.Uint64("repo_id", repo.ID), slog.Any("err", syncErr))
-	if err := u.repo.UpdateRepoSync(ctx, repo.ID, 0, syncErr.Error(), ""); err != nil {
+	// The sync deadline may have expired. Persist the attempt so the next
+	// scan still honors the repository's schedule.
+	saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := u.repo.UpdateRepoSync(saveCtx, repo.ID, 0, syncErr.Error(), ""); err != nil {
 		return nil, errors.Join(syncErr, fmt.Errorf("save sync failure: %w", err))
 	}
 	return nil, syncErr

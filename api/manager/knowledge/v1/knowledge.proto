@@ -10,6 +10,8 @@ message RepositorySourceStatus {
   bool history_complete = 4 [json_name = "history_complete"];
   string source_synced_at = 5 [json_name = "source_synced_at"];
   bool syncing = 6;
+  bool auto_sync_enabled = 7 [json_name = "auto_sync_enabled"];
+  int32 auto_sync_interval_minutes = 8 [json_name = "auto_sync_interval_minutes"];
 }
 
 // POST /v1/knowledge/repos validates access and the exact ref before insertion.
@@ -23,4 +25,6 @@ message UpdateRepositoryRequest {
   uint64 id = 1;
   string branch = 2;
   string description = 3;
+  optional bool auto_sync_enabled = 4 [json_name = "auto_sync_enabled"];
+  optional int32 auto_sync_interval_minutes = 5 [json_name = "auto_sync_interval_minutes"];
 }

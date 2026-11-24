@@ -42,6 +42,8 @@ export type KnowledgeRepo = {
   history_complete?: boolean;
   source_synced_at?: string | null;
   syncing?: boolean;
+  auto_sync_enabled?: boolean;
+  auto_sync_interval_minutes?: number;
   // Server-set: marks the embedded platform vault (url == builtin://vault).
   // Use isBuiltinVault() rather than substring-matching the URL — the URL
   // scheme has changed before (ongridio/vault → builtin://vault) and silently
@@ -149,7 +151,12 @@ export function createRepo(input: { url: string; branch?: string; description?: 
   return request<KnowledgeRepo>('POST', '/knowledge/repos', input);
 }
 
-export function updateRepo(id: number, input: { branch: string; description?: string }) {
+export function updateRepo(id: number, input: {
+  branch: string;
+  description?: string;
+  auto_sync_enabled?: boolean;
+  auto_sync_interval_minutes?: number;
+}) {
   return request<KnowledgeRepo>('PATCH', `/knowledge/repos/${id}`, input);
 }
 

@@ -10,7 +10,17 @@ import (
 	model "github.com/ongridio/ongrid/internal/manager/model/knowledge"
 )
 
-const autoSyncInterval = 5 * time.Minute
+// A new registration or a changed indexing ref gets one initial sync.
+func repoSyncDue(r *model.Repository) bool {
+	if IsBuiltinVaultURL(r.URL) {
+		return false
+	}
+	if r.LastSyncedAt == nil {
+		return true
+	}
+	return r.AutoSyncEnabled && r.AutoSyncIntervalMinutes > 0 &&
+		int64(time.Since(*r.LastSyncedAt)/time.Minute) >= int64(r.AutoSyncIntervalMinutes)
+}
 
 // RunAutoSync uses one bounded worker for startup, newly added repos and refreshes.
 func (u *Usecase) RunAutoSync(ctx context.Context) {
@@ -43,18 +53,15 @@ func (u *Usecase) syncDueRepos(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		if IsBuiltinVaultURL(r.URL) {
-			continue
-		}
-		if r.LastSyncedAt != nil && time.Since(*r.LastSyncedAt) < autoSyncInterval {
+		if !repoSyncDue(r) {
 			continue
 		}
 		if _, busy := u.active.Load(r.ID); busy {
 			continue
 		}
-		if _, err := u.Sync(ctx, r.ID); err != nil {
+		if synced, err := u.syncRepo(ctx, r.ID, true); err != nil {
 			u.log.Warn("knowledge: auto sync failed", "repo_id", r.ID, "err", err)
-		} else {
+		} else if synced != nil {
 			u.log.Info("knowledge: auto sync complete", "repo_id", r.ID)
 		}
 	}
