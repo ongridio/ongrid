@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/url"
 	"sort"
@@ -162,7 +163,10 @@ func (c *ElasticsearchClient) Search(ctx context.Context, req SearchRequest) (_ 
 		}
 		record, err := decodeElasticsearchRecord(hit.ID, hit.Source)
 		if err != nil {
-			return nil, err
+			if c.log != nil {
+				c.log.WarnContext(ctx, "skip invalid Elasticsearch log hit", slog.String("hit_id", hit.ID), slog.Any("err", err))
+			}
+			continue
 		}
 		records = append(records, record)
 	}
@@ -973,25 +977,85 @@ func int32Value(value any) int32 {
 func parseElasticsearchTime(value any) (time.Time, error) {
 	switch typed := value.(type) {
 	case string:
-		if typed == "" {
+		trimmed := strings.TrimSpace(typed)
+		if trimmed == "" {
 			return time.Time{}, errors.New("missing timestamp")
 		}
-		parsed, err := time.Parse(time.RFC3339Nano, typed)
-		if err != nil {
-			return time.Time{}, err
+		if parsed, err := time.Parse(time.RFC3339Nano, trimmed); err == nil {
+			return parsed.UTC(), nil
 		}
-		return parsed.UTC(), nil
+		return parseDecimalEpochMillis(trimmed)
 	case float64:
-		return time.UnixMilli(int64(typed)).UTC(), nil
+		return epochMillisTime(typed)
 	case json.Number:
-		n, err := typed.Int64()
-		if err != nil {
-			return time.Time{}, err
-		}
-		return time.UnixMilli(n).UTC(), nil
+		return parseDecimalEpochMillis(strings.TrimSpace(typed.String()))
 	default:
 		return time.Time{}, errors.New("missing timestamp")
 	}
+}
+
+const maxElasticsearchUnixMillis = 9e15
+
+func parseDecimalEpochMillis(raw string) (time.Time, error) {
+	if raw == "" || strings.ContainsRune(raw, '_') {
+		return time.Time{}, fmt.Errorf("invalid timestamp %q", raw)
+	}
+	if ts, ok, err := parsePlainDecimalEpochMillis(raw); ok {
+		return ts, err
+	}
+	ms, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid timestamp %q", raw)
+	}
+	return epochMillisTime(ms)
+}
+
+func parsePlainDecimalEpochMillis(raw string) (time.Time, bool, error) {
+	sign := int64(1)
+	digits := raw
+	if strings.HasPrefix(digits, "-") {
+		sign = -1
+		digits = digits[1:]
+	} else if strings.HasPrefix(digits, "+") {
+		digits = digits[1:]
+	}
+	intPart, fracPart, hasDot := strings.Cut(digits, ".")
+	if intPart == "" || !allASCIIDigits(intPart) || (hasDot && (fracPart == "" || !allASCIIDigits(fracPart))) {
+		return time.Time{}, false, nil
+	}
+	ms, err := strconv.ParseInt(intPart, 10, 64)
+	if err != nil || ms > maxElasticsearchUnixMillis {
+		return time.Time{}, true, errors.New("timestamp out of range")
+	}
+	ms *= sign
+	var extraNanos int64
+	scale := int64(100_000)
+	for i := 0; i < len(fracPart) && i < 6; i++ {
+		extraNanos += int64(fracPart[i]-'0') * scale
+		scale /= 10
+	}
+	return time.UnixMilli(ms).Add(time.Duration(sign * extraNanos)).UTC(), true, nil
+}
+
+func allASCIIDigits(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func epochMillisTime(ms float64) (time.Time, error) {
+	if math.IsNaN(ms) || math.IsInf(ms, 0) {
+		return time.Time{}, errors.New("invalid numeric timestamp")
+	}
+	if ms < -maxElasticsearchUnixMillis || ms > maxElasticsearchUnixMillis {
+		return time.Time{}, errors.New("timestamp out of range")
+	}
+	msInt := int64(ms)
+	extraNanos := int64(math.Round((ms - float64(msInt)) * float64(time.Millisecond)))
+	return time.UnixMilli(msInt).Add(time.Duration(extraNanos)).UTC(), nil
 }
 
 func elasticsearchDuration(d time.Duration) string {
