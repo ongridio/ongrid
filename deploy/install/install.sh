@@ -870,12 +870,13 @@ fi
 # ---------- wait for /healthz ----------
 # nginx terminates TLS on host port ${ONGRID_HTTP_PORT} (443 by default) and
 # proxies /healthz to the manager. -k tolerates the self-signed cert.
-log_info "waiting for /healthz on https://localhost:${ONGRID_HTTP_PORT} (up to 60s)"
+log_info "waiting for /healthz and /cmdb-readyz on https://localhost:${ONGRID_HTTP_PORT} (up to 60s)"
 HEALTH_OK=0
 for i in $(seq 1 30); do
-    if curl -fsSk "https://localhost:${ONGRID_HTTP_PORT}/healthz" >/dev/null 2>&1; then
+    if curl -fsSk "https://localhost:${ONGRID_HTTP_PORT}/healthz" >/dev/null 2>&1 \
+        && curl -fsSk "https://localhost:${ONGRID_HTTP_PORT}/cmdb-readyz" >/dev/null 2>&1; then
         HEALTH_OK=1
-        log_info "ongrid is healthy (took ~$((i*2))s)"
+        log_info "ongrid and CMDB are healthy (took ~$((i*2))s)"
         break
     fi
     printf '.'
@@ -883,8 +884,9 @@ for i in $(seq 1 30); do
 done
 printf '\n'
 if [[ $HEALTH_OK -eq 0 ]]; then
-    log_warn "ongrid did not become healthy within 60s"
+    log_warn "ongrid or CMDB did not become healthy within 60s"
     log_warn "check logs: docker compose -f $INSTALL_DIR/docker-compose.yml logs ongrid"
+    log_warn "             docker compose -f $INSTALL_DIR/docker-compose.yml logs ongrid-cmdb"
     log_warn "             docker compose -f $INSTALL_DIR/docker-compose.yml logs nginx"
 fi
 

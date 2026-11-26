@@ -7,9 +7,10 @@ development; production-style install assets live under `deploy/install/`.
 
 - `Dockerfile.ongrid` — multi-stage build for the cloud service (`cmd/ongrid`). Final image is `debian:bookworm-slim`, nonroot — **not** distroless/static: the cloud binary is cgo-linked because the local ONNX embedder (fastembed-go → libonnxruntime) needs glibc + libstdc++ + libgomp, and the image bundles ONNX Runtime under `ONNX_PATH`.
 - `Dockerfile.ongrid-edge` — the edge agent (`cmd/ongrid-edge`) is pure-Go (`CGO_ENABLED=0`), so *its* image is distroless + static (`gcr.io/distroless/static-debian12:nonroot`) — the opposite of the cloud image, which carries the embedder. Exposes `9101` only for local `/metrics` debug; the agent dials out.
-- `docker-compose.yml` — spins up `mysql`, `ongrid`, `frontier`, `nginx`, `prometheus`, and `grafana` on the `ongrid_net` bridge. MySQL is the default backend; its data lives in the named volume `mysql_data`. `ongrid-edge` is intentionally excluded (edge runs on user hosts) — a commented stanza at the bottom shows how to run one for demos.
+- `Dockerfile.ongrid-cmdb` — the standalone CMDB service (`cmd/ongrid-cmdb`), pure-Go and distroless (`gcr.io/distroless/base-debian12:nonroot`). Listens on `8082` (API) and `9102` (`/metrics`); shares the manager database and JWT secret.
+- `docker-compose.yml` — spins up `mysql`, `ongrid`, `ongrid-cmdb`, `frontier`, `nginx`, `prometheus`, and `grafana` on the `ongrid_net` bridge. MySQL is the default backend; its data lives in the named volume `mysql_data`. `ongrid-edge` is intentionally excluded (edge runs on user hosts) — a commented stanza at the bottom shows how to run one for demos. nginx routes `/api/v1/cmdb/*` to `ongrid-cmdb` and everything else under `/api/` to `ongrid`.
 - `install/` — production-style release package assets, with an install guide (`install/README.md`) covering package upload, install, upgrade, and verification on a target host.
-- `prometheus/prometheus.yml` — minimal scrape config: jobs `prometheus` and `ongrid-manager` -> `ongrid:9100/metrics`.
+- `prometheus/prometheus.yml` — minimal scrape config: jobs `prometheus`, `ongrid-manager` -> `ongrid:9100/metrics`, and `ongrid-cmdb` -> `ongrid-cmdb:9102/metrics`.
 
 ## Quickstart
 
@@ -21,9 +22,22 @@ make compose-down        # stop
 
 MySQL auto-starts as part of compose. The `ongrid` service is wired with `depends_on: mysql: { condition: service_healthy }`, so the app waits until `mysqladmin ping` succeeds before it tries to connect. On a clean volume, the MySQL container takes ~10–20s to pass its healthcheck; `make compose-up` blocks until the cloud service is up.
 
-Schema is managed via GORM `AutoMigrate` at startup — every `ongrid` boot reconciles the DB schema against the code. There is no separate `migrate` step.
+Schema is managed via GORM `AutoMigrate` at startup. The manager reconciles its own tables; `ongrid-cmdb` alone owns the CMDB (`c_*`) migrations and takes a MySQL advisory lock (`ongrid_cmdb_schema`) before running them, so two CMDB replicas cannot AutoMigrate concurrently. There is no separate `migrate` step. Stop and recreate **both** `ongrid` and `ongrid-cmdb` together on upgrade; an old manager still mounts the CMDB routes.
 
 Images are built with `make docker` (wraps `docker build` with the correct context = repo root).
+
+The builder stage downloads Go modules, so the image build needs to reach a
+module proxy. `GOPROXY` in both Dockerfiles defaults to a mirror-first chain
+(`https://goproxy.cn,https://proxy.golang.org,direct`): Go does **not** fall
+through to the next entry on a dial timeout, so on a host that can't reach
+`proxy.golang.org` the `go mod download` step stalls on a ~60s timeout per
+module and looks hung. Point the build at your own mirror by exporting
+`GOPROXY` (compose forwards it as a build arg) or with `--build-arg`:
+
+```
+GOPROXY=https://<mirror>,direct make compose-up
+docker build --build-arg GOPROXY=https://<mirror>,direct -f deploy/Dockerfile.ongrid .
+```
 
 ## Prometheus
 
@@ -89,6 +103,9 @@ In production, set both to strong values in `.env` **before** the first
 |---------------------------------|---------------------------------|
 | `http://localhost:8080`         | ongrid HTTP API                 |
 | `http://localhost:9100/metrics` | Prometheus `/metrics` on ongrid |
+| `https://localhost/api/v1/cmdb/health` | CMDB schema lineage (bearer token required) |
+| `https://localhost/cmdb-readyz` | CMDB readiness (no token; used by install/upgrade) |
+| `http://ongrid-cmdb:9102/metrics` | Prometheus `/metrics` on the CMDB service (compose network) |
 | `http://localhost:40012`         | edge tunnel listener (geminio)  |
 | `http://localhost:9090`         | Prometheus UI (targets, graph)  |
 | `localhost:3306`                | MySQL (user `ongrid`, pw `ongrid`, db `ongrid`) |

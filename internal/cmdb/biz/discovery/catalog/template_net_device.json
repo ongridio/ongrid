@@ -1,0 +1,74 @@
+[
+ {
+  "desc": "制造产商",
+  "example": "Huawei",
+  "name": "manufacturer",
+  "type": "文本"
+ },
+ {
+  "desc": "设备序列号",
+  "example": "102030059898",
+  "name": "sn",
+  "type": "文本"
+ },
+ {
+  "desc": "设备名称",
+  "example": "USG6525E",
+  "name": "name",
+  "type": "文本"
+ },
+ {
+  "desc": "设备细分类型 结合相关产商获取相应的产品类型",
+  "example": "2011.2.321.1.205",
+  "name": "model",
+  "type": "文本"
+ },
+ {
+  "desc": "设备描述",
+  "example": "Huawei Vwersatile Routing Platform Software",
+  "name": "description",
+  "type": "文本"
+ },
+ {
+  "desc": "管理ip",
+  "example": "192.168.1.1",
+  "name": "manager_ip",
+  "type": "文本"
+ },
+ {
+  "desc": "ips",
+  "example": "192.168.1.1, 192.168.1.2",
+  "name": "ips",
+  "type": "文本、多值"
+ },
+ {
+  "desc": "启动时间",
+  "example": "2023-04-15 10:00:00",
+  "name": "uptime",
+  "type": "文本"
+ },
+ {
+  "desc": "SNMP版本",
+  "example": "v2c",
+  "name": "snmp_version",
+  "type": "文本"
+ },
+ {
+  "desc": "端口数量",
+  "example": 24,
+  "name": "port_num",
+  "type": "整数"
+ },
+ {
+  "desc": "设备的端口列表",
+  "example": "",
+  "name": "ports",
+  "type": "json"
+ },
+ {
+  "desc": "设备的邻居列表",
+  "example": "",
+  "name": "neighbors",
+  "type": "json"
+ }
+]

@@ -48,13 +48,17 @@ web = jobs.fetch("web-image")
 web_publish = web.fetch("steps").find { |step| step["name"] == "Publish Web image" }
 raise "Web image publish must call its Make target" unless web_publish&.fetch("run")&.include?("make docker-push-cloud-web")
 
+cmdb = jobs.fetch("cmdb-image")
+cmdb_publish = cmdb.fetch("steps").find { |step| step["name"] == "Publish CMDB image" }
+raise "CMDB image publish must call its Make target" unless cmdb_publish&.fetch("run")&.include?("make docker-push-cloud-cmdb")
+
 k8s_edge_image = jobs.fetch("k8s-edge-image")
 k8s_edge_publish = k8s_edge_image.fetch("steps").find { |step| step["name"] == "Publish Kubernetes Edge image" }
 raise "Kubernetes Edge image publish must call its Make target" unless k8s_edge_publish&.fetch("run")&.include?("make docker-push-k8s-edge")
 
 image = jobs.fetch("image")
 image_needs = Array(image.fetch("needs"))
-raise "image finalization must wait for all parallel image builds" unless image_needs.sort == ["k8s-edge-image", "manager-image", "web-image"]
+raise "image finalization must wait for all parallel image builds" unless image_needs.sort == ["cmdb-image", "k8s-edge-image", "manager-image", "web-image"]
 download = image.fetch("steps").find { |step| step["name"] == "Download manager platform digests" }
 raise "missing manager digest artifact download" unless download
 raise "manager digest download must merge both matrix artifacts" unless download.fetch("with").fetch("merge-multiple") == true
@@ -66,17 +70,17 @@ raise "release images must be verified after manifest merge" unless verify&.fetc
 helm = image.fetch("steps").find { |step| step["name"] == "Publish Helm chart" }
 raise "Helm publish must call its Make target" unless helm&.fetch("run")&.include?("make publish-k8s-chart")
 
-[manager, web, k8s_edge_image, image].each do |job|
+[manager, cmdb, web, k8s_edge_image, image].each do |job|
   qemu = job.fetch("steps").any? { |step| step["uses"]&.start_with?("docker/setup-qemu-action@") }
   raise "optimized image jobs must not install QEMU" if qemu
   direct_docker = job.fetch("steps").any? { |step| step["run"]&.match?(/\bdocker buildx build\b/) }
   raise "release workflow must use Make targets instead of direct docker builds" if direct_docker
 end
-[manager, web, k8s_edge_image].each do |job|
+[manager, cmdb, web, k8s_edge_image].each do |job|
   raise "recovery must not overwrite published images" unless job.fetch("if") == "github.event_name != \u0027workflow_dispatch\u0027"
 end
 raise "recovery must still verify existing images" unless image.fetch("if").include?("github.event_name == \u0027workflow_dispatch\u0027")
-raise "failed image builds must block packaging" unless %w[manager-image web-image k8s-edge-image].all? { |name| image.fetch("if").include?("needs.#{name}.result == \u0027success\u0027") }
+raise "failed image builds must block packaging" unless %w[manager-image cmdb-image web-image k8s-edge-image].all? { |name| image.fetch("if").include?("needs.#{name}.result == \u0027success\u0027") }
 [download, merge].each do |step|
   raise "recovery cannot consume skipped image builds" unless step.fetch("if") == "github.event_name != \u0027workflow_dispatch\u0027"
 end
