@@ -2,10 +2,63 @@ package knowledge
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 	"unicode/utf8"
 )
+
+func TestSplitKnowledgeContent_SelectsByExtension(t *testing.T) {
+	markdown := "# Platform\n\n## Network\n\nDNS troubleshooting"
+	plain := "# Platform\n\n## Network\n\nDNS troubleshooting"
+	tests := []struct {
+		name     string
+		filename string
+		content  string
+		want     []string
+		contains string
+	}{
+		{
+			name:     "markdown",
+			filename: "runbook.md",
+			content:  markdown,
+			contains: "# Platform\n## Network",
+		},
+		{
+			name:     "markdown alternate extension",
+			filename: "runbook.MARKDOWN",
+			content:  markdown,
+			contains: "# Platform\n## Network",
+		},
+		{
+			name:     "plain text",
+			filename: "runbook.txt",
+			content:  plain,
+			want:     []string{plain},
+		},
+		{
+			name:     "reStructuredText",
+			filename: "runbook.rst",
+			content:  plain,
+			want:     []string{plain},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := splitKnowledgeContent(context.Background(), tt.filename, tt.content)
+			if err != nil {
+				t.Fatalf("split knowledge content: %v", err)
+			}
+			if tt.want != nil && !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("chunks = %#v, want %#v", got, tt.want)
+			}
+			if tt.contains != "" && !strings.Contains(strings.Join(got, "\n"), tt.contains) {
+				t.Fatalf("chunks = %#v, missing heading hierarchy %q", got, tt.contains)
+			}
+		})
+	}
+}
 
 // TestSplitForChunks_ShortDoc — a doc under chunkChars stays as one piece.
 // Regression for the pre-chunking behaviour: a 1k-char concept page must
