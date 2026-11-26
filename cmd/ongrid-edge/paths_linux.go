@@ -3,7 +3,8 @@
 package main
 
 // Linux default path constants (created by install.sh). The Windows
-// counterparts live in paths_windows.go. These were extracted from the
+// counterparts live in paths_windows.go, and Darwin in paths_darwin.go.
+// These were extracted from the
 // hardcoded paths in main.go as part of the platform split via build
 // tags: main.go only calls defaultXxx() and is unaware of the OS.
 

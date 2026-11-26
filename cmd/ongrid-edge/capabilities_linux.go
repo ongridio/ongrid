@@ -13,9 +13,9 @@ import (
 
 // registerEdgeCapabilities registers the platform-specific edge capability
 // handlers with the tunnel client. Linux side: host_files / restart_service
-// / bash. The Windows counterpart (capabilities_windows.go) registers
-// host_files only — bash and restart_service depend on cmdpolicy/systemd,
-// which are Linux-only.
+// / bash. Windows (capabilities_windows.go) and Darwin
+// (capabilities_darwin.go) register host_files only — bash and
+// restart_service depend on cmdpolicy/systemd, which are Linux-only.
 //
 // All Register calls are soft-fail: the edge keeps booting and the
 // operator sees a warning in the log when a capability is disabled. A
