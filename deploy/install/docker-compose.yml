@@ -225,7 +225,7 @@ services:
     # nginx service (in this same compose network) talks to it. Metrics
     # port stays exposed so the host's Prometheus can scrape it.
     ports:
-      - "${ONGRID_METRICS_PORT:-9100}:9100"
+      - "127.0.0.1:${ONGRID_METRICS_PORT:-9100}:9100"
     volumes:
       # Manager process logs (slog json output). Bind-mounted so operators
       # can `tail -f /var/log/ongrid/*.log` directly without docker exec
