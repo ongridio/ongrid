@@ -39,25 +39,21 @@ func Decode(r io.Reader) (any, error) {
 }
 
 // Look for conventional metadata next to the array, then in its ancestors.
-// Explicit paths are authoritative and must resolve.
-func (s Selection) field(root any, path string, keys ...string) (any, bool, error) {
+// Explicit paths take precedence over conventional names.
+func (s Selection) field(root any, path string, keys ...string) (any, bool) {
 	if path != "" {
-		v, ok := resultfile.Pointer(root, path)
-		if !ok {
-			return nil, false, fmt.Errorf("missing pagination field %q", path)
-		}
-		return v, true, nil
+		return resultfile.Pointer(root, path)
 	}
 	parent := s.Rows
 	for {
 		idx := strings.LastIndexByte(parent, '/')
 		if idx < 0 {
-			return nil, false, nil
+			return nil, false
 		}
 		parent = parent[:idx]
 		for _, key := range keys {
 			if v, ok := resultfile.Pointer(root, parent+"/"+key); ok {
-				return v, true, nil
+				return v, true
 			}
 		}
 	}
@@ -70,9 +66,9 @@ func (s Selection) Page(root any) (Page, error) {
 	if p.Rows == nil {
 		return p, fmt.Errorf("no row array at %q", s.Rows)
 	}
-	v, ok, err := s.field(root, s.Total, "total", "totalCount", "total_count")
-	if err != nil {
-		return p, err
+	v, ok := s.field(root, s.Total, "total", "totalCount", "total_count")
+	if s.Total != "" && !ok {
+		return p, fmt.Errorf("missing pagination field %q", s.Total)
 	}
 	if ok {
 		n, err := strconv.Atoi(fmt.Sprint(v))
@@ -81,10 +77,10 @@ func (s Selection) Page(root any) (Page, error) {
 		}
 		p.Total = &n
 	}
-	v, ok, err = s.field(root, s.Next, "nextCursor", "next_cursor", "nextPageToken", "next_page_token")
-	if err != nil {
-		return p, err
-	}
+	v, ok = s.field(root, s.Next, "nextCursor", "next_cursor", "nextPageToken", "next_page_token")
+	// A server may omit its custom continuation on the terminal page.
+	// The caller checks the total or an established cursor chain before
+	// treating absence as completion.
 	p.HasNextField = ok
 	if ok && v != nil {
 		var isText bool
@@ -93,10 +89,7 @@ func (s Selection) Page(root any) (Page, error) {
 			return p, fmt.Errorf("invalid upstream cursor")
 		}
 	}
-	v, ok, err = s.field(root, "", "hasMore", "has_more", "hasNextPage")
-	if err != nil {
-		return p, err
-	}
+	v, ok = s.field(root, "", "hasMore", "has_more", "hasNextPage")
 	if ok {
 		var valid bool
 		p.HasMore, valid = v.(bool)

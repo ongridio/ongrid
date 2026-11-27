@@ -81,6 +81,51 @@ func TestCollectionPaginationContracts(t *testing.T) {
 	}
 }
 
+func TestCustomCursorOmittedOnFinalPage(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		pages   []string
+		wantErr bool
+	}{
+		{"verified_chain", []string{`{"items":[1],"paging":{"after":"second"}}`, `{"items":[2]}`}, false},
+		{"verified_total", []string{`{"items":[1],"total":1}`}, false},
+		{"uncertain_first_page", []string{`{"items":[1]}`}, true},
+		{"premature_end", []string{`{"items":[1],"total":3,"paging":{"after":"second"}}`, `{"items":[2]}`}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				i := int(calls.Add(1)) - 1
+				if i >= len(tc.pages) {
+					t.Error("extra upstream call")
+					http.Error(w, "unexpected call", 400)
+					return
+				}
+				var req struct {
+					Params struct{ Arguments map[string]any }
+				}
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					t.Error(err)
+					return
+				}
+				if i == 1 && req.Params.Arguments["cursor"] != "second" {
+					t.Error("custom cursor not forwarded")
+				}
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprintf(w, `{"jsonrpc":"2.0","id":1,"result":{"structuredContent":%s}}`, tc.pages[i])
+			}))
+			defer server.Close()
+			tool := Tool{Name: "list_assets", InputSchema: json.RawMessage(`{"type":"object","properties":{"cursor":{"type":"string"}}}`)}
+			ctx := toolcapture.WithState(context.Background())
+			_, err := NewHTTP(server.URL, nil, 0).Collect(ctx, tool, map[string]any{AllPagesArgument: map[string]any{"rows_pointer": "/items", "next_pointer": "/paging/after"}})
+			_, _, partial := toolcapture.Get(ctx)
+			if (err != nil) != tc.wantErr || partial != tc.wantErr || int(calls.Load()) != len(tc.pages) {
+				t.Fatalf("err=%v partial=%t pages=%d", err, partial, calls.Load())
+			}
+		})
+	}
+}
+
 func TestCollectionSchemaEligibility(t *testing.T) {
 	f := false
 	raw := json.RawMessage(`{"type":"object","properties":{"cursor":{"type":"string"}}}`)

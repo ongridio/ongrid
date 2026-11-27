@@ -96,6 +96,9 @@ func (u *Usecase) RenderTable(ctx context.Context, scope Scope, title string, sp
 			return "", counts, fmt.Errorf("incomplete collection: received %d of %d rows; finish upstream pagination before exporting", counts.Source, *total)
 		}
 	}
+	if spec.Next != "" && !page.HasNextField && page.Total == nil && spec.ExpectedRows == nil {
+		return "", counts, fmt.Errorf("cannot verify the final page: missing cursor %q and no expected row count", spec.Next)
+	}
 	if page.HasMore || page.Next != "" {
 		return "", counts, fmt.Errorf("incomplete collection: received %d rows; finish upstream pagination before exporting", counts.Source)
 	}
@@ -154,6 +157,9 @@ func (u *Usecase) RenderTable(ctx context.Context, scope Scope, title string, sp
 		}
 	}
 	b.WriteString("</tbody></table></div></body></html>")
+	if b.Len() > maxBytes {
+		return "", counts, fmt.Errorf("rendered table exceeds 16 MiB")
+	}
 	return b.String(), counts, nil
 }
 
