@@ -226,11 +226,12 @@ func savedView(msg *schema.Message) *schema.Message {
 	if _, err := uuid.Parse(id); err != nil {
 		return msg
 	}
-	// Preserve execution, capture and paging semantics. Only the stored preview is redundant.
-	if len(v["preview"]) < 256 {
+	// Both the display preview and inline business data are recoverable by ID.
+	if len(v["preview"])+len(v["structuredContent"]) < 256 {
 		return msg
 	}
 	delete(v, "preview")
+	delete(v, "structuredContent")
 	v["view_status"] = json.RawMessage(`"reference"`)
 	raw, err := json.Marshal(v)
 	if err != nil {

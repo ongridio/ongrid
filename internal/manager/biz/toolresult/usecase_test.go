@@ -245,12 +245,9 @@ func TestMCPCollectionSelection(t *testing.T) {
 			raw := `{"content":[{"type":"text","text":"` + text + `"}],"structuredContent":{"content":[{"id":1},{"id":2},{"id":3}]}}`
 			toolcapture.Raw(ctx, []byte(raw), false)
 			encoded := u.Capture(ctx, scope, uuid.NewString(), "mcp__demo__list", text, nil, nil)
-			var view struct {
-				ResultID    string   `json:"result_id"`
-				Collections []string `json:"collection_pointers"`
-			}
-			if err := json.Unmarshal([]byte(encoded), &view); err != nil || view.ResultID == "" || len(encoded) > biz.ViewLimit || len(view.Collections) != 2 || view.Collections[0] != "/structuredContent/content" {
-				t.Fatalf("unexpected saved view id=%q, paths=%v bytes=%d", view.ResultID, view.Collections, len(encoded))
+			var view biz.View
+			if err := json.Unmarshal([]byte(encoded), &view); err != nil || view.ResultID == "" || len(encoded) > biz.ViewLimit || view.ViewStatus != "inline" || string(view.StructuredContent) != `{"content":[{"id":1},{"id":2},{"id":3}]}` {
+				t.Fatalf("unexpected inline view: %s", encoded)
 			}
 			reader := u.BindTools(scope, nil)[0]
 			for _, tc := range []struct {
@@ -279,6 +276,87 @@ func TestMCPCollectionSelection(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestMCPInlineBudgetAndCaptureState(t *testing.T) {
+	u, _, _, scope := fixture(t)
+	for _, tc := range []struct {
+		name, data, text, want string
+		partial                bool
+		err                    error
+	}{
+		{"receipt", `{"主机名":"cmdb-01","id":9007199254740993}`, "找到一台主机", "inline", false, nil},
+		{"duplicate display", `{"items":["` + strings.Repeat("甲", 850) + `"]}`, strings.Repeat("甲", 850), "inline", false, nil},
+		{"pretty", `{` + strings.Repeat(" ", 7000) + `"主机名":"a b"}`, "查询完成", "inline", false, nil},
+		{"oversized field", `{"name":"` + strings.Repeat("甲", 1500) + `"}`, "OK", "excerpt", false, nil},
+		{"whitespace in field", `{"name":"` + strings.Repeat(" ", 4500) + `"}`, "OK", "excerpt", false, nil},
+		{"partial", `{"主机名":"cmdb-01"}`, "OK", "excerpt", true, nil},
+		{"failed call", `{"主机名":"cmdb-01"}`, "", "excerpt", false, errors.New("upstream failed")},
+		{"error receipt", `{"主机名":"cmdb-01"}`, `{"status":"error"}`, "excerpt", false, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := toolcapture.WithState(context.Background())
+			receipt, _ := json.Marshal(tc.text)
+			raw := `{"content":[{"type":"text","text":` + string(receipt) + `}],"structuredContent":` + tc.data + `}`
+			toolcapture.Raw(ctx, []byte(raw), tc.partial)
+			out := u.Capture(ctx, scope, uuid.NewString(), "mcp_call", tc.text, tc.err, nil)
+			var v biz.View
+			if err := json.Unmarshal([]byte(out), &v); err != nil || len(out) > biz.ViewLimit || v.ResultID != toolcapture.ResultID(ctx) || v.ViewStatus != tc.want {
+				t.Fatalf("view=%s, bytes=%d, err=%v", v.ViewStatus, len(out), err)
+			}
+			if tc.want == "inline" {
+				want, _ := json.Marshal(json.RawMessage(tc.data))
+				if string(v.StructuredContent) != string(want) || v.Instruction != "" || (tc.name == "receipt" && v.Preview != tc.text) {
+					t.Fatalf("missing complete direct evidence: %s", out)
+				}
+			} else if v.StructuredContent != nil {
+				t.Fatal("incomplete result presented as inline")
+			}
+		})
+	}
+}
+
+func TestMCPTextAtInlineBoundary(t *testing.T) {
+	u, _, _, scope := fixture(t)
+	for _, n := range []int{biz.ViewLimit, biz.ViewLimit + 1} {
+		ctx := toolcapture.WithState(context.Background())
+		text := strings.Repeat(`"`, n)
+		block, _ := json.Marshal(text)
+		raw := `{"content":[{"type":"text","text":` + string(block) + `}]}`
+		toolcapture.Raw(ctx, []byte(raw), false)
+		out := u.Capture(ctx, scope, uuid.NewString(), "mcp__cmdb__lookup", text, nil, nil)
+		if (out == text) != (n == biz.ViewLimit) || len(out) > biz.ViewLimit || toolcapture.ResultID(ctx) == "" {
+			t.Fatalf("escaped MCP text of %d bytes: returned %d bytes", n, len(out))
+		}
+	}
+}
+
+func TestCompleteStructuredViewAtByteLimit(t *testing.T) {
+	u, _, _, scope := fixture(t)
+	render := func(n int) (string, biz.View) {
+		t.Helper()
+		ctx := toolcapture.WithState(context.Background())
+		data := `{"value":"` + strings.Repeat("x", n) + `"}`
+		toolcapture.Raw(ctx, []byte(`{"structuredContent":`+data+`}`), false)
+		got := u.Capture(ctx, scope, uuid.NewString(), "mcp_call", "", nil, nil)
+		var v biz.View
+		if err := json.Unmarshal([]byte(got), &v); err != nil || len(got) > biz.ViewLimit || v.ResultID == "" {
+			t.Fatalf("invalid %d-byte view: %v", len(got), err)
+		}
+		if v.ViewStatus == "inline" && string(v.StructuredContent) != data {
+			t.Fatal("inline payload was truncated")
+		}
+		return got, v
+	}
+	sample, _ := render(3000)
+	limit := 3000 + biz.ViewLimit - len(sample)
+	exact, v := render(limit)
+	if len(exact) != biz.ViewLimit || v.ViewStatus != "inline" {
+		t.Fatalf("exact fit: %d-byte %s", len(exact), v.ViewStatus)
+	}
+	if _, v := render(limit + 1); v.ViewStatus != "excerpt" || v.StructuredContent != nil {
+		t.Fatal("overflow did not fall back to saved evidence")
 	}
 }
 
@@ -314,7 +392,7 @@ func TestCountIndexedOversizeAndReadBytePages(t *testing.T) {
 func TestStructurePagesAndMCPTextHints(t *testing.T) {
 	u, _, _, scope := fixture(t)
 	ctx := toolcapture.WithState(context.Background())
-	data := `{"content":[{"type":"image"},{"type":"text","text":"plain"}],"structuredContent":{"a/b~":"[1,2]","rows":[]},"pad":"` + strings.Repeat("x", 6000) + `"}`
+	data := `{"content":[{"type":"image"},{"type":"text","text":"plain"}],"structuredContent":{"a/b~":"[1,2]","rows":["` + strings.Repeat("x", 6000) + `"]}}`
 	toolcapture.Raw(ctx, []byte(data), false)
 	var v biz.View
 	err := json.Unmarshal([]byte(u.Capture(ctx, scope, uuid.NewString(), "mcp_call", "receipt", nil, nil)), &v)
@@ -425,7 +503,7 @@ func TestLineCountsAcrossFragments(t *testing.T) {
 func TestMCPValueAndLateTextDiscovery(t *testing.T) {
 	u, _, _, scope := fixture(t)
 	ctx := toolcapture.WithState(context.Background())
-	raw := `{"content":[` + strings.Repeat(`{"type":"image"},`, 12) + `{"type":"text","text":"` + strings.Repeat("a", 6500) + `"}],"structuredContent":{"content":{"total":42,"a/b~":false,"absent":null}}}`
+	raw := `{"content":[` + strings.Repeat(`{"type":"image"},`, 12) + `{"type":"text","text":"` + strings.Repeat("a", 6500) + `"}],"structuredContent":{"content":{"total":42,"a/b~":false,"absent":null},"rows":["` + strings.Repeat("x", 4500) + `"]}}`
 	toolcapture.Raw(ctx, []byte(raw), false)
 	out := u.Capture(ctx, scope, uuid.NewString(), "mcp_call", "receipt", nil, nil)
 	var v biz.View
@@ -452,6 +530,7 @@ func TestMCPValueAndLateTextDiscovery(t *testing.T) {
 		seen[path.Pointer] = path.Kind
 	}
 	want["/content"] = "array"
+	want["/structuredContent/rows"] = "array"
 	want["/content/12/text"] = "text"
 	if !page.CountExact || !maps.Equal(seen, want) {
 		t.Errorf("structure paths=%v", seen)

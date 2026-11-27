@@ -1,6 +1,7 @@
 package toolresult
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -21,6 +22,7 @@ import (
 	session "github.com/ongridio/ongrid/internal/manager/model/aiops"
 	model "github.com/ongridio/ongrid/internal/manager/model/toolresult"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
+	"github.com/ongridio/ongrid/internal/pkg/mcpclient"
 	"github.com/ongridio/ongrid/internal/pkg/resultfile"
 	"github.com/ongridio/ongrid/internal/pkg/toolcapture"
 )
@@ -134,6 +136,7 @@ type View struct {
 	MoreIndexedPaths   bool                `json:"more_indexed_paths,omitempty"`
 	PathIndexPartial   bool                `json:"path_index_partial,omitempty"`
 	Preview            string              `json:"preview,omitempty"`
+	StructuredContent  json.RawMessage     `json:"structuredContent,omitempty"`
 	Instruction        string              `json:"instruction,omitempty"`
 }
 
@@ -278,19 +281,15 @@ func (u *Usecase) Capture(ctx context.Context, scope Scope, executionID, tool, o
 		return encodeView(v)
 	}
 	toolcapture.Link(ctx, row.ID)
-	// Keep control envelopes and small legacy results byte-for-byte intact.
-	if ((len(output) <= ViewLimit && len(raw) <= ViewLimit) || tool == "draft_config_change") && runErr == nil && row.CaptureStatus == "complete" {
-		if !isMCPResult(tool) {
+	if runErr == nil && row.CaptureStatus == "complete" {
+		small := len(output) <= ViewLimit && len(raw) <= ViewLimit
+		if isMCPResult(tool) {
+			if result, ok := inlineMCPResult(v, raw, output, small); ok {
+				return result
+			}
+		} else if small || tool == "draft_config_change" {
 			return output
 		}
-		var mcp struct {
-			Structured json.RawMessage `json:"structuredContent"`
-		}
-		if json.Unmarshal(raw, &mcp) != nil || len(mcp.Structured) == 0 || string(mcp.Structured) == "null" || string(mcp.Structured) == output {
-			return output
-		}
-		// A small MCP text block can be just a receipt for structured data.
-		v.Preview = "/structuredContent: " + prefix(string(mcp.Structured), 1024) + "\nMCP text: " + prefix(output, 768)
 	}
 	if row.ContentType == "application/json" {
 		idx, indexErr := u.repo.Index(writeCtx, row)
@@ -314,6 +313,87 @@ func (u *Usecase) Capture(ctx context.Context, scope Scope, executionID, tool, o
 		v.Instruction += " For this saved analysis use json_text at /stdout with collection_pointer /values or /coverage."
 	}
 	return encodeView(v)
+}
+
+// Fit the business payload independently of the MCP display text. Keep the
+// saved reference for follow-up reads and exports. Never truncate the payload.
+func inlineMCPResult(v View, raw []byte, output string, small bool) (string, bool) {
+	var mcp struct {
+		Structured inlineMCPPayload `json:"structuredContent"`
+	}
+	if json.Unmarshal(raw, &mcp) != nil {
+		return output, small
+	}
+	if len(mcp.Structured) == 0 || string(mcp.Structured) == "null" {
+		return output, small || (v.Status == "success" && len(output) <= ViewLimit && isCompleteMCPText(raw, output))
+	}
+	if small && string(mcp.Structured) == output {
+		return output, true
+	}
+	if v.Status != "success" {
+		return "", false
+	}
+	v.ViewStatus = "inline"
+	v.StructuredContent = json.RawMessage(mcp.Structured)
+	v.Instruction = ""
+	v.Preview = ""
+	b, err := json.Marshal(v)
+	if err != nil || len(b) > ViewLimit {
+		return "", false
+	}
+	if string(mcp.Structured) != output {
+		v.Preview = prefix(output, max(0, ViewLimit-len(b)-len(`,"preview":""`)))
+		if v.Preview != "" {
+			return encodeView(v), true
+		}
+	}
+	return string(b), true
+}
+
+// A JSON string can fit after unescaping even when its wire representation
+// does not. Only bypass the saved view if the text accounts for the result.
+func isCompleteMCPText(raw []byte, output string) bool {
+	var result mcpclient.CallResult
+	d := json.NewDecoder(bytes.NewReader(raw))
+	d.DisallowUnknownFields()
+	if d.Decode(&result) != nil || result.IsError || len(result.Content) == 0 {
+		return false
+	}
+	for _, block := range result.Content {
+		if block.Type != "text" || len(block.Text) > len(output) {
+			return false
+		}
+	}
+	return result.TextContent() == output
+}
+
+type inlineMCPPayload []byte
+
+func (p *inlineMCPPayload) UnmarshalJSON(data []byte) error {
+	// Skip large business arrays without making another full-size copy. Pretty
+	// printing can put a small value over the limit, so ignore JSON whitespace
+	// for this lower bound. json.Compact preserves whitespace inside strings.
+	if len(data) > ViewLimit {
+		n := 0
+		for _, b := range data {
+			if b > ' ' {
+				n++
+			}
+			if n > ViewLimit {
+				return errors.New("MCP payload exceeds inline limit")
+			}
+		}
+		var compact bytes.Buffer
+		if err := json.Compact(&compact, data); err != nil {
+			return err
+		}
+		data = compact.Bytes()
+		if len(data) > ViewLimit {
+			return errors.New("MCP payload exceeds inline limit")
+		}
+	}
+	*p = append((*p)[:0], data...)
+	return nil
 }
 
 type cursor struct {

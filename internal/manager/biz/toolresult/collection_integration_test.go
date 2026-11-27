@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -24,12 +25,106 @@ import (
 	session "github.com/ongridio/ongrid/internal/manager/model/aiops"
 	mcpmodel "github.com/ongridio/ongrid/internal/manager/model/mcp"
 	"github.com/ongridio/ongrid/internal/pkg/mcpclient"
+	"github.com/ongridio/ongrid/internal/pkg/resultanalysis"
 	"github.com/ongridio/ongrid/internal/pkg/resultset"
 )
 
 type collectionRegistration struct {
 	mcpbiz.Repo
 	row *mcpmodel.Server
+}
+
+func TestSingleTurnSmallCMDBLookup(t *testing.T) {
+	for _, allPages := range []bool{false, true} {
+		t.Run(fmt.Sprintf("all_pages_%t", allPages), func(t *testing.T) {
+			u, _, _, scope := fixture(t)
+			if runtime.GOOS == "linux" {
+				analyzer, err := resultanalysis.NewClient()
+				if err != nil {
+					t.Fatal(err)
+				}
+				u.SetAnalyzer(analyzer)
+			}
+			const assets = `{"items":[{"主机名":"cmdb-01","业务IP":"192.0.2.17","部门":"研发部","环境":"测试","资产ID":9007199254740993}],"total":1}`
+			var toolCalls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var req struct {
+					ID     int
+					Method string
+					Params struct {
+						Name      string
+						Arguments map[string]any
+					}
+				}
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					t.Error(err)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				switch req.Method {
+				case "initialize":
+					fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"result":{"capabilities":{}}}`, req.ID)
+				case "notifications/initialized":
+					w.WriteHeader(http.StatusAccepted)
+				case "tools/call":
+					if req.Params.Name != "list_hosts" || len(req.Params.Arguments) != 1 || req.Params.Arguments["name"] != "cmdb-01" {
+						t.Errorf("unexpected CMDB query: %+v", req.Params)
+					}
+					toolCalls.Add(1)
+					fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"result":{"content":[{"type":"text","text":"找到一台主机"}],"structuredContent":%s}}`, req.ID, assets)
+				default:
+					t.Errorf("unexpected MCP method: %s", req.Method)
+				}
+			}))
+			defer server.Close()
+			catalog := mcpclient.Tool{Name: "list_hosts", InputSchema: json.RawMessage(`{"type":"object","properties":{"cursor":{"type":"string"},"name":{"type":"string"}}}`)}
+			cache, _ := json.Marshal([]mcpclient.Tool{catalog})
+			uc := mcpbiz.NewUsecase(collectionRegistration{row: &mcpmodel.Server{Name: "cmdb", Endpoint: server.URL, Enabled: true, Trusted: true, ToolsCacheJSON: string(cache)}}, nil, nil)
+			lookup := tools.NewMCPTool("cmdb", catalog.Name, "", catalog.ChatInputSchema(), true, collectionCaller{uc}, nil, nil)
+			turns := 0
+			llm := inventoryModel(func(msgs []*schema.Message) (*schema.Message, error) {
+				turns++
+				if turns == 1 {
+					args := `{"name":"cmdb-01"}`
+					if allPages {
+						args = `{"name":"cmdb-01","ongrid_all_pages":{"rows_pointer":"/items"}}`
+					}
+					return schema.AssistantMessage("", []schema.ToolCall{{ID: "lookup", Function: schema.FunctionCall{Name: "mcp__cmdb__list_hosts", Arguments: args}}}), nil
+				}
+				last := msgs[len(msgs)-1]
+				var view toolresult.View
+				if turns != 2 || last.Role != schema.Tool || last.ToolCallID != "lookup" || json.Unmarshal([]byte(last.Content), &view) != nil || view.ViewStatus != "inline" || view.ResultID == "" || view.Instruction != "" {
+					return nil, fmt.Errorf("CMDB did not return inline business data: %s", last.Content)
+				}
+				var rows []map[string]json.RawMessage
+				var data map[string]json.RawMessage
+				if err := json.Unmarshal(view.StructuredContent, &data); err != nil {
+					return nil, err
+				}
+				key := "items"
+				if allPages {
+					key = "rows"
+				}
+				if err := json.Unmarshal(data[key], &rows); err != nil || len(rows) != 1 {
+					return nil, fmt.Errorf("unexpected CMDB rows: %s", data[key])
+				}
+				row := rows[0]
+				return schema.AssistantMessage(fmt.Sprintf("%s %s %s %s %s", row["主机名"], row["业务IP"], row["部门"], row["环境"], row["资产ID"]), nil), nil
+			})
+			graph, err := v3.BuildReActGraph(llm, u.BindTools(scope, []basetool.BaseTool{lookup}), v3.Config{MaxIterations: 5})
+			if err != nil {
+				t.Fatal(err)
+			}
+			out, err := graph.Invoke(context.Background(), &v3.Input{UserText: "查一下 CMDB 里 cmdb-01 的业务 IP、部门、环境和资产 ID"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if toolCalls.Load() != 1 || turns != 2 || out.AssistantMessage.Content != `"cmdb-01" "192.0.2.17" "研发部" "测试" 9007199254740993` {
+				t.Fatalf("CMDB queries=%d, model calls=%d, answer=%s", toolCalls.Load(), turns, out.AssistantMessage.Content)
+			}
+			t.Logf("one CMDB query, direct answer from the first tool response: %s", out.AssistantMessage.Content)
+		})
+	}
 }
 
 func (r collectionRegistration) GetByName(context.Context, string) (*mcpmodel.Server, error) {
@@ -47,15 +142,22 @@ type tableModel struct {
 	pageID string
 }
 
-func (m *tableModel) WithTools([]*schema.ToolInfo) (model.ToolCallingChatModel, error) { return m, nil }
-func (m *tableModel) Stream(ctx context.Context, msgs []*schema.Message, opts ...model.Option) (*schema.StreamReader[*schema.Message], error) {
-	msg, err := m.Generate(ctx, msgs, opts...)
+type inventoryModel func([]*schema.Message) (*schema.Message, error)
+
+func (m inventoryModel) WithTools([]*schema.ToolInfo) (model.ToolCallingChatModel, error) {
+	return m, nil
+}
+func (m inventoryModel) Generate(_ context.Context, msgs []*schema.Message, _ ...model.Option) (*schema.Message, error) {
+	return m(msgs)
+}
+func (m inventoryModel) Stream(_ context.Context, msgs []*schema.Message, _ ...model.Option) (*schema.StreamReader[*schema.Message], error) {
+	msg, err := m(msgs)
 	if err != nil {
 		return nil, err
 	}
 	return schema.StreamReaderFromArray([]*schema.Message{msg}), nil
 }
-func (m *tableModel) Generate(_ context.Context, msgs []*schema.Message, _ ...model.Option) (*schema.Message, error) {
+func (m *tableModel) reply(msgs []*schema.Message) (*schema.Message, error) {
 	m.step++
 	call := func(name, args string) *schema.Message {
 		return &schema.Message{Role: schema.Assistant, ToolCalls: []schema.ToolCall{{ID: strconv.Itoa(m.step), Function: schema.FunctionCall{Name: name, Arguments: args}}}}
@@ -168,7 +270,7 @@ func TestSingleTurnInventoryExport(t *testing.T) {
 			store := pages.FileStore{Dir: t.TempDir()}
 			pageTool := tools.NewServePageTool(store, u, nil)
 			llm := &tableModel{}
-			graph, err := v3.BuildReActGraph(llm, u.BindTools(scope, []basetool.BaseTool{mcp, pageTool}), v3.Config{MaxIterations: 5})
+			graph, err := v3.BuildReActGraph(inventoryModel(llm.reply), u.BindTools(scope, []basetool.BaseTool{mcp, pageTool}), v3.Config{MaxIterations: 5})
 			if err != nil {
 				t.Fatal(err)
 			}

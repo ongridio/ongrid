@@ -149,6 +149,11 @@ func TestContextToolReferenceAndOversizedCurrentInput(t *testing.T) {
 	if ref == msg || strings.Contains(ref.Content, s) || !strings.Contains(ref.Content, "partial") || msg.Content != text {
 		t.Fatal("evidence projection lost semantics")
 	}
+	inline := schema.ToolMessage(fmt.Sprintf(`{"kind":"tool_result","result_id":"e659aa59-7b05-4e83-9bf4-d214996de221","storage_status":"ready","capture_status":"complete","view_status":"inline","structuredContent":{"主机名":%q}}`, s), "cmdb")
+	projected := savedView(inline)
+	if !strings.Contains(projected.Content, `"view_status":"reference"`) || strings.Contains(projected.Content, "structuredContent") || !strings.Contains(inline.Content, s) {
+		t.Fatal("inline data did not compact to its saved reference")
+	}
 	raw := newScriptedChatModel(schema.AssistantMessage("unused", nil))
 	m := &windowModel{inner: raw, raw: raw, window: &ContextWindow{Capability: llm.WindowCapability{Total: 1024}}}
 	user := currentContextMessage()
