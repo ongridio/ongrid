@@ -24,6 +24,7 @@ import (
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 	"github.com/ongridio/ongrid/internal/pkg/mcpclient"
 	"github.com/ongridio/ongrid/internal/pkg/resultfile"
+	"github.com/ongridio/ongrid/internal/pkg/resultset"
 	"github.com/ongridio/ongrid/internal/pkg/toolcapture"
 )
 
@@ -120,6 +121,13 @@ func (u *Usecase) Open(ctx context.Context, scope Scope, id string) (*model.Resu
 	return r, f, err
 }
 
+// RowQueryHint can be passed directly to query_tool_result.
+type RowQueryHint struct {
+	ResultID    string `json:"result_id"`
+	Mode        string `json:"mode"`
+	RowsPointer string `json:"rows_pointer"`
+}
+
 type View struct {
 	Operation          *basetool.Operation `json:"operation,omitempty"`
 	Kind               string              `json:"kind"`
@@ -137,6 +145,8 @@ type View struct {
 	PathIndexPartial   bool                `json:"path_index_partial,omitempty"`
 	Preview            string              `json:"preview,omitempty"`
 	StructuredContent  json.RawMessage     `json:"structuredContent,omitempty"`
+	AmbiguousRowSource bool                `json:"ambiguous_row_source,omitempty"`
+	RowQueries         []RowQueryHint      `json:"row_queries,omitempty"`
 	TableSource        *TableSource        `json:"table_source,omitempty"`
 	Instruction        string              `json:"instruction,omitempty"`
 }
@@ -199,14 +209,21 @@ func encodeView(v View) string {
 		switch {
 		case len(v.Preview) > 0:
 			v.Preview = prefix(v.Preview, len(v.Preview)/2)
+		case v.TableSource != nil && len(v.TableSource.ContrastingRows) > 0:
+			v.TableSource.ContrastingRows = nil
 		case v.TableSource != nil && len(v.TableSource.SampleFields) > 0:
 			v.TableSource.SampleFields = v.TableSource.SampleFields[:len(v.TableSource.SampleFields)-1]
+		case v.TableSource != nil && len(v.TableSource.ValueCounts) > 0:
+			v.TableSource.ValueCounts = v.TableSource.ValueCounts[:len(v.TableSource.ValueCounts)-1]
 		case len(v.TextPointers) > 0:
 			v.MoreIndexedPaths = true
 			v.TextPointers = v.TextPointers[:len(v.TextPointers)-1]
 		case len(v.ValuePointers) > 0:
 			paths := sortedPointers(slices.Collect(maps.Keys(v.ValuePointers)))
 			delete(v.ValuePointers, paths[len(paths)-1])
+			v.MoreIndexedPaths = true
+		case len(v.RowQueries) > 1:
+			v.RowQueries = v.RowQueries[:len(v.RowQueries)-1]
 			v.MoreIndexedPaths = true
 		case len(v.CollectionPointers) > 0:
 			v.MoreIndexedPaths = true
@@ -267,10 +284,10 @@ func (u *Usecase) Capture(ctx context.Context, scope Scope, executionID, tool, o
 		instruction += " The source or capture limit omitted data; saved evidence is incomplete and cannot establish whole-dataset counts or absence."
 	} else {
 		if status == "success" && tool != "analyze_tool_results" {
-			instruction += " For an HTML list, pass this result_id, rows_pointer, columns and filters directly to serve_page.table. It verifies pagination, applies the filters and returns row counts."
+			instruction += " For an HTML list, write the complete page and CSS in serve_page.html. Bind one data-ongrid-row with data-ongrid-field elements to this result_id, rows_pointer and filters in serve_page.table. Use data-ongrid-count for totals."
 		}
 		if u.analyzer != nil {
-			instruction += " For custom calculations, joins or nested formats, use analyze_tool_results to evaluate jq expressions over the complete saved inputs."
+			instruction += " For custom calculations or joins, use analyze_tool_results to evaluate jq expressions over the complete saved inputs."
 		}
 	}
 	v := View{Kind: "tool_result", ResultID: row.ID, Status: status, ExecutionStatus: executionStatus, CaptureStatus: row.CaptureStatus, StorageStatus: "ready", ViewStatus: "excerpt", CapturedBytes: int64(len(raw)), Preview: prefix(string(raw), 2048), Instruction: instruction}
@@ -296,8 +313,10 @@ func (u *Usecase) Capture(ctx context.Context, scope Scope, executionID, tool, o
 			return output
 		}
 	}
+	var idx resultfile.Index
 	if row.ContentType == "application/json" {
-		idx, indexErr := u.repo.Index(writeCtx, row)
+		var indexErr error
+		idx, indexErr = u.repo.Index(writeCtx, row)
 		if indexErr != nil {
 			v.PathIndexPartial = true
 			u.log.WarnContext(writeCtx, "cannot describe saved result index", "result_id", row.ID, "err", indexErr)
@@ -318,15 +337,46 @@ func (u *Usecase) Capture(ctx context.Context, scope Scope, executionID, tool, o
 		v.Instruction += " For this saved analysis use json_text at /stdout with collection_pointer /values or /coverage."
 	}
 	if isMCPResult(tool) && status == "success" && row.CaptureStatus == "complete" {
-		v.TableSource = describeTextTable(raw)
+		v.TableSource, err = describeSavedTable(raw, true, true)
+		if errors.Is(err, resultset.ErrAmbiguousRows) {
+			v.AmbiguousRowSource = true
+			v.Instruction += " " + prefix(err.Error(), 1024)
+		}
 		if v.TableSource != nil {
-			v.Instruction = "For an HTML list, pass this result_id, table_source.text_pointer and table_source.rows_pointer to serve_page.table with the requested columns and filters. The preview is an excerpt. Reuse the saved rows directly. Keep the requested search scope; use or_pointers for alternative fields and ignore_case when appropriate. saved_rows counts this capture. The exporter checks upstream totals and pagination and returns counts."
-			if u.analyzer != nil {
-				v.Instruction += " For custom analysis, use json_text with text_pointer as pointer and rows_pointer as collection_pointer. Each inputs record has the business row under .value."
+			v.Instruction = rowSelectionHint + ` For HTML, use {"html":"...","table":{"result_id":"` + row.ID + `","filters":[...]}}. The server computes the intersection and all counts. Query rows when a field or value is unclear.`
+			if len(v.TableSource.ContrastingRows) > 0 {
+				v.Instruction = "Mixed categories: compare contrasting_rows when present. For a specific kind or area with an exception, include its positive equals/contains filter AND the negative exception filter. An exclusion alone triggers a scope review. " + v.Instruction
 			}
+		} else if len(raw) <= ScanLimit {
+			for _, path := range v.CollectionPointers {
+				if (path == "/structuredContent" || strings.HasPrefix(path, "/structuredContent/")) && indexedRecordArray(raw, idx.Collections[path]) {
+					v.RowQueries = append(v.RowQueries, RowQueryHint{ResultID: row.ID, Mode: "rows", RowsPointer: path})
+				}
+			}
+			if len(v.RowQueries) > 0 {
+				v.Instruction = "For a record list, choose the row_queries entry matching the requested population and pass it to query_tool_result. Add filters, fields or group_by as needed. For HTML, pass the same result_id, rows_pointer and filters inside serve_page.table with your HTML in serve_page.html. Use structure mode for more indexed paths."
+			} else if len(raw) > maxTextTableHintBytes && len(v.TextPointers) > 0 {
+				v.Instruction += " For records encoded in MCP text, first call query_tool_result with mode=rows and result_id. It discovers the record collection or reports the candidate paths."
+			}
+		} else if hasBusinessArray(v) {
+			v.Instruction += " This result exceeds the rows query size limit. For a bounded sample use read_tool_result mode=json with the matching indexed collection_pointer. For calculations over that array, stream its individual elements using format=json when analysis is available."
 		}
 	}
 	return encodeView(v)
+}
+
+// The index points at original JSON tokens. Classify complete arrays without
+// decoding a second copy of the payload or treating display blocks as rows.
+func indexedRecordArray(raw []byte, collection resultfile.Collection) bool {
+	if !collection.Complete {
+		return false
+	}
+	for _, item := range collection.Items {
+		if item.Start < 0 || item.Start >= int64(len(raw)) || raw[item.Start] != '{' {
+			return false
+		}
+	}
+	return true
 }
 
 // Fit the business payload independently of the MCP display text. Keep the
@@ -339,9 +389,28 @@ func inlineMCPResult(v View, raw []byte, output string, small bool) (string, boo
 		return output, small
 	}
 	if len(mcp.Structured) == 0 || string(mcp.Structured) == "null" {
-		return output, small || (v.Status == "success" && len(output) <= ViewLimit && isCompleteMCPText(raw, output))
+		direct := small || (v.Status == "success" && len(output) <= ViewLimit && isCompleteMCPText(raw, output))
+		if direct && v.Status == "success" && strings.Contains(output, "[") {
+			h, err := describeSavedTable(raw, true, false)
+			if h != nil || errors.Is(err, resultset.ErrAmbiguousRows) {
+				// Preserve the full business JSON and a usable export reference together when they fit.
+				v.TableSource, v.Preview, v.Instruction, v.ViewStatus = h, output, "", "inline"
+				if err != nil {
+					v.AmbiguousRowSource = true
+					v.Instruction = prefix(err.Error(), 1024)
+				}
+				if body, err := json.Marshal(v); err == nil && len(body) <= ViewLimit {
+					return string(body), true
+				}
+				if err != nil || !json.Valid([]byte(output)) {
+					return "", false // Keep the result ID when a multi-part response needs a saved view.
+				}
+			}
+		}
+		return output, direct
 	}
-	if small && string(mcp.Structured) == output {
+	direct := small && string(mcp.Structured) == output
+	if direct && (v.Status != "success" || len(resultfile.BuildIndex(mcp.Structured).Collections) == 0) {
 		return output, true
 	}
 	if v.Status != "success" {
@@ -353,7 +422,7 @@ func inlineMCPResult(v View, raw []byte, output string, small bool) (string, boo
 	v.Preview = ""
 	b, err := json.Marshal(v)
 	if err != nil || len(b) > ViewLimit {
-		return "", false
+		return output, direct
 	}
 	if string(mcp.Structured) != output {
 		v.Preview = prefix(output, max(0, ViewLimit-len(b)-len(`,"preview":""`)))

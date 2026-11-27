@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -164,17 +165,20 @@ func (m *tableModel) reply(msgs []*schema.Message) (*schema.Message, error) {
 	}
 	switch m.step {
 	case 1:
-		return call("mcp__inventory__list_assets", `{"env":"prod","ongrid_all_pages":{"rows_pointer":"/items","id_pointer":"/id"}}`), nil
+		return call("mcp__inventory__list_assets", `{"env":"prod","ongrid_all_pages":{"id_pointer":"/id"}}`), nil
 	case 2:
 		var view toolresult.View
 		if err := json.Unmarshal([]byte(msgs[len(msgs)-1].Content), &view); err != nil || view.ResultID == "" || view.CaptureStatus != "complete" {
 			return nil, fmt.Errorf("missing complete saved list: %s", msgs[len(msgs)-1].Content)
 		}
 		spec := toolresult.TableSpec{ResultID: view.ResultID, Selection: resultset.Selection{Rows: "/structuredContent/rows"}, Filters: []toolresult.TableFilter{{Pointer: "/group", Op: "not_equals", Value: "exclude"}}}
+		var headers, cells strings.Builder
 		for _, field := range []string{"ip", "host", "group", "purpose", "env", "config", "owner"} {
-			spec.Columns = append(spec.Columns, toolresult.TableColumn{Label: field, Pointer: "/" + field})
+			fmt.Fprintf(&headers, "<th>%s</th>", field)
+			fmt.Fprintf(&cells, `<td data-ongrid-field="/%s"></td>`, field)
 		}
-		args, err := json.Marshal(map[string]any{"title": "资产清单", "table": spec})
+		layout := `<!doctype html><html><head><style>.inventory{border-spacing:0}</style></head><body><main><table class="inventory"><thead><tr>` + headers.String() + `</tr></thead><tbody><tr data-ongrid-row>` + cells.String() + `</tr></tbody></table></main></body></html>`
+		args, err := json.Marshal(map[string]any{"title": "资产清单", "html": layout, "table": spec})
 		if err != nil {
 			return nil, err
 		}
@@ -185,7 +189,7 @@ func (m *tableModel) reply(msgs []*schema.Message) (*schema.Message, error) {
 			URL    string
 			Counts toolresult.TableCounts
 		}
-		if err := json.Unmarshal([]byte(msgs[len(msgs)-1].Content), &receipt); err != nil || receipt.ID == "" || receipt.URL != "/pages/"+receipt.ID || receipt.Counts != (toolresult.TableCounts{Source: 91, Excluded: 13, Exported: 78}) {
+		if err := json.Unmarshal([]byte(msgs[len(msgs)-1].Content), &receipt); err != nil || receipt.ID == "" || receipt.URL != "/pages/"+receipt.ID || !reflect.DeepEqual(receipt.Counts, toolresult.TableCounts{Source: 91, Excluded: 13, Exported: 78, ExcludedByFilter: []int{13}}) {
 			return nil, fmt.Errorf("bad page receipt: %s", msgs[len(msgs)-1].Content)
 		}
 		m.pageID = receipt.ID
@@ -284,11 +288,11 @@ func TestSingleTurnInventoryExport(t *testing.T) {
 				t.Fatal(err)
 			}
 			html := string(body)
-			if n := strings.Count(html, "<td>"); n != 78*7 {
+			if n := strings.Count(html, "<td data-ongrid-field="); n != 78*7 {
 				t.Fatalf("wrong table size %d", n)
 			}
 			for i := range 91 {
-				cell := fmt.Sprintf("<td>asset-%03d</td>", i+1)
+				cell := fmt.Sprintf(`<td data-ongrid-field="/host">asset-%03d</td>`, i+1)
 				if strings.Contains(html, cell) != (i%7 != 0) {
 					t.Fatalf("wrong row %d", i+1)
 				}
@@ -338,6 +342,12 @@ func TestServePageChecksSavedSourceBeforePublishing(t *testing.T) {
 		t.Fatalf("incomplete encoded collection: %v", err)
 	}
 	groupID := capture(t, u, scope, `{"items":[{"id":1,"name":"SVN"},{"id":2,"name":"wiki"}]}`)
+	t.Run("misplaced filters", func(t *testing.T) {
+		args := fmt.Sprintf(`{"html":"<ul><li data-ongrid-row><b data-ongrid-field='/id'></b></li></ul>","table":{"result_id":%q},"filters":[{"pointer":"/name","op":"equals","value":"SVN"}]}`, groupID)
+		if _, err := pageTool.InvokableRun(ctx, args, basetool.WithUserID(scope.UserID)); err == nil || !strings.Contains(err.Error(), "table") {
+			t.Fatalf("misplaced filters must be rejected before publication: %v", err)
+		}
+	})
 	for _, tc := range []struct{ filter, problem string }{
 		{`{"pointer":"/name","or_pointers":["/typo"],"op":"contains","value":"SVN"}`, "absent from all source rows"},
 		{`{"pointer":"/name","or_pointer":["/id"],"op":"contains","value":"SVN"}`, "unknown field"},

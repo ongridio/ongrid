@@ -230,3 +230,28 @@ func TestAnalysisReportsMCPBlockSelection(t *testing.T) {
 		t.Fatalf("report: %s %v", report, err)
 	}
 }
+
+func TestAnalysisAcceptsSavedRowCoordinates(t *testing.T) {
+	u, _, _, scope := fixture(t)
+	ctx := context.Background()
+	id := capture(t, u, scope, `{"content":[{"type":"text","text":"{}"}]}`)
+	calls := 0
+	u.SetAnalyzer(analysisFunc(func(_ context.Context, r resultanalysis.Request) (runner.Result, error) {
+		calls++
+		if r.Inputs[0].Pointer != "/content/0/text" || r.Inputs[0].CollectionPointer != "/rows" {
+			t.Fatal(r.Inputs[0].Source)
+		}
+		return runner.Result{Stdout: "1"}, nil
+	}))
+	tool := analysisTool(t, u, scope)
+	base := `{"inputs":[{"result_id":"` + id + `","format":"json_text","text_pointer":"/content/0/text","rows_pointer":"/rows"`
+	for _, extra := range []string{`,"pointer":""`, `,"collection_pointer":"/other"`, ""} {
+		_, err := tool.InvokableRun(toolcapture.WithState(ctx), base+extra+`}],"expression":"1"}`)
+		if (err != nil) != (extra != "") {
+			t.Fatal(extra, err)
+		}
+	}
+	if calls != 1 {
+		t.Fatal(calls)
+	}
+}
