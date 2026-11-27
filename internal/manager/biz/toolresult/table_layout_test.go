@@ -65,6 +65,21 @@ func TestFieldBindingWithEmptyClassHint(t *testing.T) {
 	}
 }
 
+func TestNumberColumnUsesAnUnboundCell(t *testing.T) {
+	u, _, _, scope := fixture(t)
+	id := capture(t, u, scope, `[{"name":"first","status":"open"},{"name":"second","status":"closed"}]`)
+	spec := toolresult.TableSpec{ResultID: id, Columns: []toolresult.TableColumn{{Label: "Name", Pointer: "/name"}, {Label: "Status", Pointer: "/status"}}}
+	const layout = `<style>tbody{counter-reset:record}tr{counter-increment:record}.ordinal:before{content:counter(record)}</style><table><thead><tr><th>#</th><th>Name</th><th>Status</th></tr></thead><tbody><tr data-ongrid-row><td class="ordinal"></td><td data-ongrid-field="/name"></td><td data-ongrid-field="/status"></td></tr></tbody></table>`
+	wrong := strings.Replace(layout, `class="ordinal"`, `data-ongrid-field="/name"`, 1)
+	if page, _, err := u.RenderTablePage(context.Background(), scope, wrong, spec); page != "" || err == nil || !strings.Contains(err.Error(), `binding 2 is "/name" but table.columns declares "/status"`) {
+		t.Fatalf("expected the first mismatched field: %v", err)
+	}
+	page, counts, err := u.RenderTablePage(context.Background(), scope, layout, spec)
+	if err != nil || counts.Exported != 2 || strings.Count(page, `class="ordinal"></td>`) != 2 {
+		t.Fatal(page, counts, err)
+	}
+}
+
 func TestModelAuthoredPagePublication(t *testing.T) {
 	u, _, _, scope := fixture(t)
 	ctx := basetool.WithArtifactSource(basetool.WithSessionID(context.Background(), scope.SessionID), basetool.ArtifactSourceChat)

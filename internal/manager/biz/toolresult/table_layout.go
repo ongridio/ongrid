@@ -176,13 +176,13 @@ func (u *Usecase) RenderTablePage(ctx context.Context, scope Scope, layout strin
 		fields[i] = f.path
 	}
 	if len(spec.Columns) > 0 {
-		if len(spec.Columns) != len(fields) {
-			return "", counts, errors.New("table.columns must match the bound fields or be omitted")
-		}
-		for i, col := range spec.Columns {
-			if col.Pointer != fields[i] {
-				return "", counts, errors.New("table.columns must match the bound field order or be omitted")
+		for i := 0; i < min(len(spec.Columns), len(fields)); i++ {
+			if spec.Columns[i].Pointer != fields[i] {
+				return "", counts, fmt.Errorf("field binding %d is %q but table.columns declares %q there; align the bindings with their headings. For row numbers use a CSS counter in an unbound cell", i+1, fields[i], spec.Columns[i].Pointer)
 			}
+		}
+		if len(spec.Columns) != len(fields) {
+			return "", counts, fmt.Errorf("HTML has %d field bindings but table.columns declares %d; check for an extra or missing bound field. The HTML bindings alone are sufficient when columns is omitted", len(fields), len(spec.Columns))
 		}
 	}
 	var rows pageBuffer
