@@ -137,6 +137,7 @@ type View struct {
 	PathIndexPartial   bool                `json:"path_index_partial,omitempty"`
 	Preview            string              `json:"preview,omitempty"`
 	StructuredContent  json.RawMessage     `json:"structuredContent,omitempty"`
+	TableSource        *TableSource        `json:"table_source,omitempty"`
 	Instruction        string              `json:"instruction,omitempty"`
 }
 
@@ -198,6 +199,8 @@ func encodeView(v View) string {
 		switch {
 		case len(v.Preview) > 0:
 			v.Preview = prefix(v.Preview, len(v.Preview)/2)
+		case v.TableSource != nil && len(v.TableSource.SampleFields) > 0:
+			v.TableSource.SampleFields = v.TableSource.SampleFields[:len(v.TableSource.SampleFields)-1]
 		case len(v.TextPointers) > 0:
 			v.MoreIndexedPaths = true
 			v.TextPointers = v.TextPointers[:len(v.TextPointers)-1]
@@ -262,11 +265,13 @@ func (u *Usecase) Capture(ctx context.Context, scope Scope, executionID, tool, o
 	instruction := "Use query_tool_result to select evidence, or read_tool_result for a bounded page. Preview is only an excerpt; do not re-run the original tool to retrieve more data."
 	if row.CaptureStatus == "partial" {
 		instruction += " The source or capture limit omitted data; saved evidence is incomplete and cannot establish whole-dataset counts or absence."
-	} else if u.analyzer != nil {
-		instruction += " For whole-dataset questions, custom calculations, joins or nested formats, use analyze_tool_results to evaluate jq expressions over the complete saved inputs."
-	}
-	if row.CaptureStatus == "complete" && status == "success" && tool != "analyze_tool_results" {
-		instruction += " For complete HTML lists, pass this result_id, rows_pointer, columns and filters to serve_page.table. Export rows directly without paging them into chat."
+	} else {
+		if status == "success" && tool != "analyze_tool_results" {
+			instruction += " For an HTML list, pass this result_id, rows_pointer, columns and filters directly to serve_page.table. It verifies pagination, applies the filters and returns row counts."
+		}
+		if u.analyzer != nil {
+			instruction += " For custom calculations, joins or nested formats, use analyze_tool_results to evaluate jq expressions over the complete saved inputs."
+		}
 	}
 	v := View{Kind: "tool_result", ResultID: row.ID, Status: status, ExecutionStatus: executionStatus, CaptureStatus: row.CaptureStatus, StorageStatus: "ready", ViewStatus: "excerpt", CapturedBytes: int64(len(raw)), Preview: prefix(string(raw), 2048), Instruction: instruction}
 	v.Operation = captureOperation(tool, output)
@@ -311,6 +316,15 @@ func (u *Usecase) Capture(ctx context.Context, scope Scope, executionID, tool, o
 	}
 	if tool == "analyze_tool_results" && status == "success" && u.analyzer != nil {
 		v.Instruction += " For this saved analysis use json_text at /stdout with collection_pointer /values or /coverage."
+	}
+	if isMCPResult(tool) && status == "success" && row.CaptureStatus == "complete" {
+		v.TableSource = describeTextTable(raw)
+		if v.TableSource != nil {
+			v.Instruction = "For an HTML list, pass this result_id, table_source.text_pointer and table_source.rows_pointer to serve_page.table with the requested columns and filters. The preview is an excerpt. Reuse the saved rows directly. Keep the requested search scope; use or_pointers for alternative fields and ignore_case when appropriate. saved_rows counts this capture. The exporter checks upstream totals and pagination and returns counts."
+			if u.analyzer != nil {
+				v.Instruction += " For custom analysis, use json_text with text_pointer as pointer and rows_pointer as collection_pointer. Each inputs record has the business row under .value."
+			}
+		}
 	}
 	return encodeView(v)
 }

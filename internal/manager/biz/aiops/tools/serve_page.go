@@ -44,16 +44,16 @@ var servePageSchema = json.RawMessage(`{
     "html": { "type": "string", "description": "完整的 HTML 文档字符串（自带 <html><body>…）。会原样托管。" },
     "title": { "type":"string", "description":"Page title" },
     "table": {
-      "type":"object","description":"Generate the entire table directly from a saved result. Use this for complete lists and inventory exports. Never page through rows to compose HTML. For a paginated MCP query request ongrid_all_pages first. Filters apply to each source row before projection.",
+      "type":"object","description":"Generate the entire table directly from a saved result. Use this for complete lists and inventory exports. Never page through rows to compose HTML. Use table_source from the saved result when available. A previously saved page with the full upstream total can be exported directly. For incomplete upstream pages collect the remaining rows first. Apply the requested selection only; describe the chosen fields if the wording is ambiguous.",
       "properties":{
         "result_id":{"type":"string"},
         "rows_pointer":{"type":"string","description":"JSON Pointer to the business row array, e.g. /structuredContent/rows. Use an empty string for a root array."},
-        "text_pointer":{"type":"string","description":"For JSON encoded inside a text block, e.g. /content/0/text. Other pointers are then relative to the decoded text."},
+        "text_pointer":{"type":"string","description":"For JSON encoded inside a text block, e.g. /content/0/text. rows_pointer and pagination pointers are relative to the decoded text; column and filter pointers are relative to each row."},
         "total_pointer":{"type":"string","description":"Upstream total if nonstandard"},
         "next_pointer":{"type":"string","description":"Upstream continuation if nonstandard"},
         "expected_rows":{"type":"integer","minimum":0,"description":"Unfiltered total when declared by the source"},
         "columns":{"type":"array","minItems":1,"maxItems":32,"items":{"type":"object","properties":{"label":{"type":"string"},"pointer":{"type":"string","description":"Field pointer within one row"}},"required":["label","pointer"],"additionalProperties":false}},
-        "filters":{"type":"array","maxItems":32,"description":"All conditions must match","items":{"type":"object","properties":{"pointer":{"type":"string"},"op":{"type":"string","enum":["equals","not_equals","contains","not_contains"]},"value":{"type":"string"}},"required":["pointer","op","value"],"additionalProperties":false}}
+        "filters":{"type":"array","maxItems":32,"description":"All filters must match. Up to 32 field comparisons across all filters. Within one filter, test pointer and or_pointers together: positive operators match any field; negative operators require no field to match.","items":{"type":"object","properties":{"pointer":{"type":"string"},"or_pointers":{"type":"array","maxItems":31,"items":{"type":"string"},"description":"Alternative row fields for the same comparison. Missing or null alternatives do not match; supplied paths must exist somewhere in the source."},"ignore_case":{"type":"boolean","description":"Case-insensitive text comparison, false by default."},"op":{"type":"string","enum":["equals","not_equals","contains","not_contains"]},"value":{"type":"string"}},"required":["pointer","op","value"],"additionalProperties":false}}
       },"required":["result_id","rows_pointer","columns"],"additionalProperties":false
     }
   }

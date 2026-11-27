@@ -43,20 +43,21 @@ type Item struct {
 	Fragment bool   `json:"fragment,omitempty"`
 }
 type Page struct {
-	ResultID       string `json:"result_id"`
-	CaptureStatus  string `json:"capture_status"`
-	StorageStatus  string `json:"storage_status"`
-	Mode           string `json:"mode"`
-	Items          []Item `json:"items"`
-	NextCursor     string `json:"next_cursor,omitempty"`
-	ScannedBytes   int64  `json:"scanned_bytes"`
-	ScanStart      int64  `json:"scan_start"`
-	ScanEnd        int64  `json:"scan_end"`
-	ScanComplete   bool   `json:"scan_complete"`
-	Count          int64  `json:"count"`
-	CountExact     bool   `json:"count_exact"`
-	CountScope     string `json:"count_scope"`
-	Notice         string `json:"notice,omitempty"`
+	ResultID       string       `json:"result_id"`
+	CaptureStatus  string       `json:"capture_status"`
+	StorageStatus  string       `json:"storage_status"`
+	Mode           string       `json:"mode"`
+	Items          []Item       `json:"items"`
+	NextCursor     string       `json:"next_cursor,omitempty"`
+	ScannedBytes   int64        `json:"scanned_bytes"`
+	ScanStart      int64        `json:"scan_start"`
+	ScanEnd        int64        `json:"scan_end"`
+	ScanComplete   bool         `json:"scan_complete"`
+	Count          int64        `json:"count"`
+	CountExact     bool         `json:"count_exact"`
+	CountScope     string       `json:"count_scope"`
+	Notice         string       `json:"notice,omitempty"`
+	TableSource    *TableSource `json:"table_source,omitempty"`
 	indexExhausted bool
 }
 
@@ -167,7 +168,9 @@ func (u *Usecase) structurePage(ctx context.Context, row *model.Result, req Requ
 	}
 	// Older file-backed indexes lack native values and most text locations.
 	// Rediscover them only when the payload fits a single reader scan.
-	if idx.PathIndexStatus == "" && row.ContentType == "application/json" && row.CapturedBytes <= ScanLimit {
+	rebuildIndex := idx.PathIndexStatus == "" && row.ContentType == "application/json" && row.CapturedBytes <= ScanLimit
+	describeRows := offset == 0 && isMCPResult(row.ToolName) && row.ExecutionStatus == "success" && row.CaptureStatus == "complete" && row.CapturedBytes <= maxTextTableHintBytes && (rebuildIndex || slices.Contains(idx.TextPointers, "/content/0/text"))
+	if rebuildIndex || describeRows {
 		f, err := u.repo.Open(ctx, row)
 		if err != nil {
 			return err
@@ -180,7 +183,12 @@ func (u *Usecase) structurePage(ctx context.Context, row *model.Result, req Requ
 		if p.ScannedBytes != row.CapturedBytes {
 			return resultfile.ErrCorrupt
 		}
-		idx = resultfile.BuildIndex(body)
+		if rebuildIndex {
+			idx = resultfile.BuildIndex(body)
+		}
+		if describeRows {
+			p.TableSource = describeTextTable(body)
+		}
 	}
 	kinds := make(map[string]string, len(idx.Collections)+len(idx.TextPointers)+len(idx.ValuePointers))
 	maps.Copy(kinds, idx.ValuePointers)

@@ -333,6 +333,20 @@ func TestServePageChecksSavedSourceBeforePublishing(t *testing.T) {
 			}
 		})
 	}
+	encodedID := capture(t, u, scope, `{"content":[{"type":"text","text":"{\"total\":91,\"data\":[{\"id\":1}]}"}]}`)
+	if _, err := invoke(ctx, encodedID, "/data", "/content/0/text", nil); err == nil || !strings.Contains(err.Error(), "received 1 of 91 rows") {
+		t.Fatalf("incomplete encoded collection: %v", err)
+	}
+	groupID := capture(t, u, scope, `{"items":[{"id":1,"name":"SVN"},{"id":2,"name":"wiki"}]}`)
+	for _, tc := range []struct{ filter, problem string }{
+		{`{"pointer":"/name","or_pointers":["/typo"],"op":"contains","value":"SVN"}`, "absent from all source rows"},
+		{`{"pointer":"/name","or_pointer":["/id"],"op":"contains","value":"SVN"}`, "unknown field"},
+	} {
+		args := fmt.Sprintf(`{"table":{"result_id":%q,"rows_pointer":"/items","columns":[{"label":"ID","pointer":"/id"}],"filters":[%s]}}`, groupID, tc.filter)
+		if _, err := pageTool.InvokableRun(ctx, args, basetool.WithUserID(scope.UserID)); err == nil || !strings.Contains(err.Error(), tc.problem) {
+			t.Fatalf("invalid filter %s: %v", tc.filter, err)
+		}
+	}
 	if got, err := store.List(ctx); err != nil || len(got) != 0 {
 		t.Fatalf("pages before success: %v %v", got, err)
 	}

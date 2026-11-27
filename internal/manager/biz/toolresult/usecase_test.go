@@ -317,6 +317,43 @@ func TestMCPInlineBudgetAndCaptureState(t *testing.T) {
 	}
 }
 
+func TestMCPTextTableDiscovery(t *testing.T) {
+	u, _, _, scope := fixture(t)
+	for _, tc := range []struct {
+		name, body string
+		partial    bool
+		want       bool
+	}{
+		{"escaped pointers", `{"data/~":[{"x/y~z":1}]}`, false, true},
+		{"empty array", `{"data/~":[]}`, false, true},
+		{"mixed row types", `[{}, {}, {}, null]`, false, false},
+		{"ambiguous arrays", `{"records":[{}], "items":[{}]}`, false, false},
+		{"invalid text", `{"data":[`, false, false},
+		{"partial capture", `{"data":[{}]}`, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := toolcapture.WithState(context.Background())
+			body := strings.Repeat(" ", biz.ViewLimit) + tc.body
+			block, err := json.Marshal(body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			toolcapture.Raw(ctx, []byte(`{"content":[{"type":"text","text":`+string(block)+`}]}`), tc.partial)
+			out := u.Capture(ctx, scope, uuid.NewString(), "mcp_call", body, nil, nil)
+			var v biz.View
+			if err := json.Unmarshal([]byte(out), &v); err != nil || v.ViewStatus != "excerpt" || (v.TableSource != nil) != tc.want {
+				t.Fatalf("unexpected table discovery: %+v, %v", v.TableSource, err)
+			}
+			if tc.want && v.TableSource.RowsPointer != "/data~1~0" {
+				t.Fatal(v.TableSource)
+			}
+			if tc.name == "escaped pointers" && !slices.Equal(v.TableSource.SampleFields, []string{"/x~1y~0z"}) {
+				t.Fatal(v.TableSource.SampleFields)
+			}
+		})
+	}
+}
+
 func TestMCPTextAtInlineBoundary(t *testing.T) {
 	u, _, _, scope := fixture(t)
 	for _, n := range []int{biz.ViewLimit, biz.ViewLimit + 1} {
