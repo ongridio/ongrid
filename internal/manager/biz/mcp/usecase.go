@@ -257,6 +257,29 @@ func (u *Usecase) CallToolRevision(ctx context.Context, serverName, toolName str
 	if err := cli.Initialize(ctx); err != nil {
 		return "", err
 	}
+	if _, requested := args[mcpclient.AllPagesArgument]; requested {
+		catalog, err := cachedTools(s.ToolsCacheJSON)
+		if err != nil {
+			return "", err
+		}
+		var native bool
+		for _, t := range catalog {
+			if t.Name != toolName {
+				continue
+			}
+			if mcpclient.CanCollect(t) {
+				return cli.Collect(ctx, t, args)
+			}
+			var schema struct{ Properties map[string]json.RawMessage }
+			if json.Unmarshal(t.InputSchema, &schema) == nil {
+				_, native = schema.Properties[mcpclient.AllPagesArgument]
+			}
+			break
+		}
+		if !native {
+			return "", fmt.Errorf("tool %q does not advertise all-pages collection; refresh its schema or request one page", toolName)
+		}
+	}
 	res, err := cli.CallTool(ctx, toolName, args)
 	if err != nil {
 		return "", err

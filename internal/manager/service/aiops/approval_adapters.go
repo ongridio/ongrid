@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/ongridio/ongrid/internal/pkg/mcpclient"
 	"github.com/ongridio/ongrid/internal/pkg/toolcapture"
 	"os"
 	"path/filepath"
@@ -325,6 +326,9 @@ func (s MCPProposer) ProposeMCPCallAndAwait(ctx context.Context, server, tool st
 		return "", fmt.Errorf("marshal MCP approval arguments: %w", err)
 	}
 	cmd := server + " / " + tool + " " + string(argsJSON)
+	if plan, ok := args[mcpclient.AllPagesArgument].(map[string]any); ok && plan["rows_pointer"] != nil {
+		cmd = "[all pages] " + cmd
+	}
 	if len(cmd) > 200 {
 		cmd = cmd[:200] + "…"
 	}

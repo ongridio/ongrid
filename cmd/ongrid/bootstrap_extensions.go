@@ -242,7 +242,7 @@ func bootstrapExtensions(rootCtx context.Context, cfg *config.Config, log *slog.
 			aiopstoolsdec.Wrap(aiopstools.NewBashToolWithProposer(tunnel.fbClient, devices.edgeUC, devices.deviceUC, managersvcaiops.HostBashProposer{Usecase: approvalUC}, settings.settingSvc.AgentCommandPolicyApprovalEnabled, log), cbDeps),
 			aiopstoolsdec.Wrap(aiopstools.NewCloudBashTool(managersvcaiops.CloudBashProposer{Usecase: approvalUC}, log), cbDeps),
 			aiopstoolsdec.Wrap(aiopstools.NewInstallSkillTool(managersvcaiops.InstallSkillProposer{Usecase: approvalUC}, log), cbDeps),
-			aiopstoolsdec.Wrap(aiopstools.NewServePageTool(pageStore, log), quickDeps),
+			aiopstoolsdec.Wrap(aiopstools.NewServePageTool(pageStore, aiops.results, log), quickDeps),
 			aiopstoolsdec.Wrap(aiopstools.NewSendNotificationTool(managersvcaiops.NotificationSender{Channels: alerts.alertRepo, Router: notifyRouter}, log), quickDeps),
 			aiopstoolsdec.Wrap(aiopstools.NewSendIMMessageTool(managersvcimbridge.IMMessageSender{Apps: aiops.imbridgeRepo}, log), quickDeps),
 		}); err != nil {
