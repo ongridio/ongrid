@@ -91,6 +91,20 @@ func TestModelAuthoredPagePublication(t *testing.T) {
 			}
 		})
 	}
+	t.Run("excess rows cannot be corrected by fetching another page", func(t *testing.T) {
+		total := 1
+		for _, tc := range []struct {
+			spec toolresult.TableSpec
+			hint string
+		}{
+			{toolresult.TableSpec{ResultID: source, ExpectedRows: &total}, "expected_rows must be the unfiltered upstream total"},
+			{toolresult.TableSpec{ResultID: capture(t, u, scope, `{"total":1,"items":[{"id":1},{"id":2}]}`)}, "exceeding its upstream total"},
+		} {
+			if _, err := invoke("<ul>"+row+"</ul>", &tc.spec); err == nil || !strings.Contains(err.Error(), tc.hint) {
+				t.Fatalf("expected an actionable total mismatch: %v", err)
+			}
+		}
+	})
 	t.Run("repeated markup exceeds output limit", func(t *testing.T) {
 		long := strings.Repeat("x", 1<<20)
 		largeLayout := `<section><article data-ongrid-row><p>` + long + `</p><span data-ongrid-field="/id"></span></article></section>`

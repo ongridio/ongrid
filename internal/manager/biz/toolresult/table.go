@@ -124,6 +124,12 @@ func (u *Usecase) tableRows(ctx context.Context, scope Scope, spec TableSpec, ma
 		return nil, metaBytes, err
 	}
 	n := len(page.Rows)
+	if page.Total != nil && n > *page.Total {
+		return nil, metaBytes, fmt.Errorf("saved collection has %d rows, exceeding its upstream total of %d; verify the selected array and upstream total before exporting", n, *page.Total)
+	}
+	if spec.ExpectedRows != nil && n > *spec.ExpectedRows {
+		return nil, metaBytes, fmt.Errorf("expected_rows must be the unfiltered upstream total: the saved source already contains %d rows, exceeding expected_rows=%d; omit this optional argument unless the source declares it, and put subset criteria in table.filters", n, *spec.ExpectedRows)
+	}
 	for _, total := range []*int{page.Total, spec.ExpectedRows} {
 		if total != nil && *total != n {
 			return nil, metaBytes, fmt.Errorf("incomplete collection: received %d of %d rows; finish upstream pagination before exporting", n, *total)

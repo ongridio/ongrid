@@ -52,7 +52,7 @@ var servePageSchema = json.RawMessage(`{
         "total_pointer":{"type":"string","description":"Upstream total if nonstandard"},
         "next_pointer":{"type":"string","description":"Upstream continuation if nonstandard"},
         "all_remaining_categories":{"type":"boolean","description":"For an exclusion-only export, set true only when every remaining category belongs to the requested population. Otherwise apply the requested positive filters."},
-        "expected_rows":{"type":"integer","minimum":0,"description":"Unfiltered total when declared by the source"},
+        "expected_rows":{"type":"integer","minimum":0,"description":"Optional consistency check. Omit unless the upstream declares a total for the entire source array before any table filters. Filtered and exported counts are computed by the server."},
         "columns":{"type":"array","description":"Optional legacy projection. Normally the field bindings in html select the columns.","minItems":1,"maxItems":32,"items":{"type":"object","properties":{"label":{"type":"string"},"pointer":{"type":"string","description":"Field pointer within one row"}},"required":["label","pointer"],"additionalProperties":false}},
         "filters":` + toolresult.TableFiltersSchema + `
       },"required":["result_id"],"additionalProperties":false
