@@ -322,7 +322,7 @@ func (u *Usecase) Capture(ctx context.Context, scope Scope, executionID, tool, o
 	if isMCPResult(tool) && status == "success" && row.CaptureStatus == "complete" {
 		v.TableSource = describeSavedTable(raw, true, true)
 		if v.TableSource != nil {
-			v.Instruction = "Use saved_row_value_counts for exact individual field distributions within this capture. For a complete HTML list, choose the requested filters from those values and call serve_page directly with your own HTML/CSS, field and count bindings, and table.result_id plus filters. The exporter applies all filters to each source row and verifies pagination. If field relationships or examples are needed, use query_tool_result once with mode=rows, group_by and/or fields and filters. It resolves the business rows by result_id. The preview is an excerpt."
+			v.Instruction = "See saved_row_value_counts for individual field distributions. " + rowSelectionHint + " For HTML, send your layout and table.result_id with the complete filters to serve_page. For examples or to check their intersection, use query_tool_result mode=rows. Omit row paths for a unique collection."
 		}
 	}
 	return encodeView(v)

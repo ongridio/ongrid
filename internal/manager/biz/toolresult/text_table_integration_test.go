@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -141,7 +142,7 @@ func TestSingleTurnExportFromMCPText(t *testing.T) {
 			if err := json.Unmarshal([]byte(msgs[len(msgs)-1].Content), &receipt); err != nil {
 				return nil, err
 			}
-			if receipt.ID == "" || receipt.Counts != (toolresult.TableCounts{Source: 91, Excluded: 18, Exported: 73}) {
+			if receipt.ID == "" || !reflect.DeepEqual(receipt.Counts, toolresult.TableCounts{Source: 91, Excluded: 18, Exported: 73, ExcludedByFilter: []int{6, 5, 7}}) {
 				return nil, fmt.Errorf("wrong export: %+v", receipt)
 			}
 			pageID = receipt.ID

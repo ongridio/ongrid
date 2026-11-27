@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -14,6 +15,40 @@ import (
 	"github.com/ongridio/ongrid/internal/pkg/resultset"
 	"github.com/ongridio/ongrid/internal/pkg/toolcapture"
 )
+
+func TestExclusionOnlyChatExportReviewsRemainingCategories(t *testing.T) {
+	u, _, _, scope := fixture(t)
+	source := capture(t, u, scope, `[{"id":1,"kind":"issue","state":"open"},{"id":2,"kind":"issue","state":"new"},{"id":3,"kind":"alert","state":"new"},{"id":4,"kind":"issue","state":"closed"}]`)
+	spec := toolresult.TableSpec{ResultID: source, Filters: []toolresult.TableFilter{{Pointer: "/state", Op: "not_equals", Value: "closed"}}}
+	ctx := basetool.WithArtifactSource(context.Background(), basetool.ArtifactSourceChat)
+	const layout = `<ul><li data-ongrid-row><span data-ongrid-field="/id"></span></li></ul>`
+	page, _, err := u.RenderTablePage(ctx, scope, layout, spec)
+	if err == nil || page != "" || !strings.Contains(err.Error(), "issue") || !strings.Contains(err.Error(), "alert") || strings.Contains(err.Error(), `"/state"`) {
+		t.Fatalf("expected evidence from unfiltered fields before publication, got %q, %v", page, err)
+	}
+	for _, tc := range []struct {
+		name     string
+		ctx      context.Context
+		all      bool
+		positive bool
+		want     int
+	}{
+		{"all remaining categories requested", ctx, true, false, 3},
+		{"requested category selected", ctx, false, true, 2},
+		{"existing workflow", basetool.WithArtifactSource(context.Background(), basetool.ArtifactSourceWorkflow), false, false, 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			selection := spec
+			selection.AllRemainingCategories = tc.all
+			if tc.positive {
+				selection.Filters = append(selection.Filters, toolresult.TableFilter{Pointer: "/kind", Op: "equals", Value: "issue"})
+			}
+			if page, counts, err := u.RenderTablePage(tc.ctx, scope, layout, selection); err != nil || counts.Exported != tc.want || page == "" {
+				t.Fatal(page, counts, err)
+			}
+		})
+	}
+}
 
 func TestModelAuthoredPagePublication(t *testing.T) {
 	u, _, _, scope := fixture(t)
@@ -90,10 +125,12 @@ func TestModelAuthoredPagePublication(t *testing.T) {
 		}
 		body := string(page)
 		excluded := 0
+		var byFilter []int
 		if empty {
 			excluded = 2
+			byFilter = []int{2}
 		}
-		if receipt.Counts != (toolresult.TableCounts{Source: 2, Excluded: excluded, Exported: 2 - excluded}) || !strings.Contains(body, fmt.Sprintf(`<span data-ongrid-count="source_rows">2</span>/<span data-ongrid-count="excluded_rows">%d</span>/<span data-ongrid-count="exported_rows">%d</span>`, excluded, 2-excluded)) || strings.Count(body, "<li data-ongrid-row=") != 2-excluded {
+		if !reflect.DeepEqual(receipt.Counts, toolresult.TableCounts{Source: 2, Excluded: excluded, Exported: 2 - excluded, ExcludedByFilter: byFilter}) || !strings.Contains(body, fmt.Sprintf(`<span data-ongrid-count="source_rows">2</span>/<span data-ongrid-count="excluded_rows">%d</span>/<span data-ongrid-count="exported_rows">%d</span>`, excluded, 2-excluded)) || strings.Count(body, "<li data-ongrid-row=") != 2-excluded {
 			t.Fatalf("wrong page or counts: %s %s", out, body)
 		}
 		if !empty && (strings.Count(body, `<b data-ongrid-field="/id">9007199254740993</b>`) != 2 || !strings.Contains(body, "&lt;ops &amp; team&gt;") || !strings.Contains(body, `<em data-ongrid-field="/optional"></em>`)) {

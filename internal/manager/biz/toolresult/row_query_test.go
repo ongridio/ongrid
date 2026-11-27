@@ -99,6 +99,49 @@ func TestRowQueryBoundsAndAmbiguity(t *testing.T) {
 	}
 }
 
+func TestGroupedSamplesShowDifferentPartsOfOrderedResults(t *testing.T) {
+	u, _, _, scope := fixture(t)
+	records := make([]map[string]string, 12)
+	for i := range records {
+		kind := "service"
+		if i >= 9 {
+			kind = "client"
+		}
+		records[i] = map[string]string{"kind": kind, "name": fmt.Sprint(i), "detail": strings.Repeat("x", 2000)}
+	}
+	body, _ := json.Marshal(map[string]any{"tickets": records})
+	wrapper, _ := json.Marshal(map[string]any{"content": []map[string]string{{"type": "text", "text": string(body)}}})
+	ctx := toolcapture.WithState(context.Background())
+	toolcapture.Raw(ctx, wrapper, false)
+	u.Capture(ctx, scope, uuid.NewString(), "mcp__tickets__list", string(body), nil, nil)
+	id := toolcapture.ResultID(ctx)
+	tool := u.BindTools(scope, nil)[1]
+	out, err := tool.InvokableRun(ctx, fmt.Sprintf(`{"result_id":%q,"mode":"rows","rows_pointer":"/tickets","group_by":["kind","name"],"limit":3}`, id))
+	var r struct {
+		Samples []map[string]string `json:"sample_rows"`
+		Matched int                 `json:"matched_rows"`
+	}
+	if err != nil || json.Unmarshal([]byte(out), &r) != nil || r.Matched != 12 || len(r.Samples) != 3 {
+		t.Fatal(out, err)
+	}
+	for i, want := range []int{0, 5, 11} {
+		got := r.Samples[i]
+		if len(got) != 2 || got["/kind"] != records[want]["kind"] || got["/name"] != records[want]["name"] {
+			t.Fatal(got)
+		}
+	}
+	spec := biz.TableSpec{ResultID: id, Filters: []biz.TableFilter{{Pointer: "/kind", Op: "equals", Value: "service"}}}
+	spec.Rows = "/tickets"
+	layout := `<ul><li data-ongrid-row><span data-ongrid-field="/name"></span></li></ul>`
+	if _, counts, err := u.RenderTablePage(ctx, scope, layout, spec); err != nil || counts.Exported != 9 {
+		t.Fatal(counts, err)
+	}
+	spec.Rows = "/typo"
+	if _, _, err := u.RenderTablePage(ctx, scope, layout, spec); err == nil {
+		t.Fatal("substituted an unrequested row array")
+	}
+}
+
 func TestSavedFieldDistributionsDescribeOnlyCapturedRows(t *testing.T) {
 	u, _, _, scope := fixture(t)
 	var tickets []map[string]any

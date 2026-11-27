@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -188,7 +189,7 @@ func (m *tableModel) reply(msgs []*schema.Message) (*schema.Message, error) {
 			URL    string
 			Counts toolresult.TableCounts
 		}
-		if err := json.Unmarshal([]byte(msgs[len(msgs)-1].Content), &receipt); err != nil || receipt.ID == "" || receipt.URL != "/pages/"+receipt.ID || receipt.Counts != (toolresult.TableCounts{Source: 91, Excluded: 13, Exported: 78}) {
+		if err := json.Unmarshal([]byte(msgs[len(msgs)-1].Content), &receipt); err != nil || receipt.ID == "" || receipt.URL != "/pages/"+receipt.ID || !reflect.DeepEqual(receipt.Counts, toolresult.TableCounts{Source: 91, Excluded: 13, Exported: 78, ExcludedByFilter: []int{13}}) {
 			return nil, fmt.Errorf("bad page receipt: %s", msgs[len(msgs)-1].Content)
 		}
 		m.pageID = receipt.ID

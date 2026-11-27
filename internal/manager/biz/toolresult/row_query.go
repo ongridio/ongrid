@@ -125,13 +125,17 @@ type rowQuery struct {
 	Limit       *int          `json:"limit,omitempty"`
 }
 type rowAnswer struct {
-	ResultID      string           `json:"result_id"`
-	Source        int              `json:"source_rows"`
-	Matched       int              `json:"matched_rows"`
-	Groups        []fieldCounts    `json:"value_counts,omitempty"`
-	Samples       []map[string]any `json:"sample_rows,omitempty"`
-	SampleLimited bool             `json:"sample_limited,omitempty"`
+	ResultID         string           `json:"result_id"`
+	Source           int              `json:"source_rows"`
+	Matched          int              `json:"matched_rows"`
+	ExcludedByFilter []int            `json:"excluded_by_filter,omitempty"`
+	Groups           []fieldCounts    `json:"value_counts,omitempty"`
+	Samples          []map[string]any `json:"sample_rows,omitempty"`
+	SampleLimited    bool             `json:"sample_limited,omitempty"`
+	SelectionHint    string           `json:"selection_hint,omitempty"`
 }
+
+const rowSelectionHint = "Treat broad search hits as candidates. Check each requested inclusion (entity type, scope) and exclusion against the source or row fields. Apply them together in table.filters. Separate field counts do not establish their intersection."
 
 func (t *readerTool) queryRows(ctx context.Context, q rowQuery) (string, int64, error) {
 	if len(q.GroupBy) > 8 || len(q.Fields) > 32 {
@@ -176,18 +180,30 @@ func (t *readerTool) queryRows(ctx context.Context, q rowQuery) (string, int64, 
 		out.Groups = append(out.Groups, fieldCounts{Field: p})
 	}
 	sampleBytes := 0
+	fields := q.Fields
+	if len(fields) == 0 {
+		fields = q.GroupBy
+	}
+	// An unfiltered collection can be sampled across its entire extent in one
+	// pass. Consecutive records are often sorted by type, region or status.
+	limit = min(limit, len(rows))
+	matchedIndex := -1
 	counts, err := visitMatchingRows(ctx, rows, filters, func(row any) error {
+		matchedIndex++
 		for i := range out.Groups {
 			out.Groups[i].add(row)
 		}
 		if len(out.Samples) >= limit || out.SampleLimited {
 			return nil
 		}
+		if len(filters) == 0 && limit > 1 && matchedIndex != len(out.Samples)*(len(rows)-1)/(limit-1) {
+			return nil
+		}
 		projected := map[string]any{}
-		if len(q.Fields) == 0 {
+		if len(fields) == 0 {
 			projected, _ = row.(map[string]any)
 		} else {
-			for _, p := range q.Fields {
+			for _, p := range fields {
 				if v, ok := resultfile.Pointer(row, p); ok {
 					projected[p] = v
 				}
@@ -209,6 +225,13 @@ func (t *readerTool) queryRows(ctx context.Context, q rowQuery) (string, int64, 
 		return "", scanned, err
 	}
 	out.Source, out.Matched = counts.Source, counts.Exported
+	out.ExcludedByFilter = counts.ExcludedByFilter
+	for _, group := range out.Groups {
+		if len(group.Values) > 1 {
+			out.SelectionHint = rowSelectionHint
+			break
+		}
+	}
 	for {
 		b, err := json.Marshal(out)
 		if err != nil {

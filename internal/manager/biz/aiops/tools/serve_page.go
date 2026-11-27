@@ -44,13 +44,14 @@ var servePageSchema = json.RawMessage(`{
     "html": { "type": "string", "description": "Write the complete HTML document and CSS for the requested page. For a saved list, also supply table. Design one repeatable element (tr, li, article or div) marked data-ongrid-row alone in its container. Bind empty cells or spans with data-ongrid-field (a row JSON Pointer). Example: <tbody><tr data-ongrid-row><td data-ongrid-field=\"/name\"></td></tr></tbody>. Put verified totals in empty spans with data-ongrid-count=\"exported_rows\", \"excluded_rows\" or \"source_rows\" outside the row. Use these bindings for records and metrics; sample rows and hardcoded totals can be inaccurate." },
     "title": { "type":"string", "description":"Page title" },
     "table": {
-      "type":"object","description":"Bind a saved result to your HTML design. Include both html and table for complete lists and inventory exports. A unique business row array is resolved automatically from result_id; supply explicit paths when ambiguous. A previously saved page with the full upstream total can be exported directly. For incomplete upstream pages collect the remaining rows first. Apply the requested selection only; describe the chosen fields if the wording is ambiguous.",
+      "type":"object","description":"Bind a saved result to your HTML design. Include both html and table for complete lists and inventory exports. A unique business row array is resolved automatically from result_id; supply explicit paths when ambiguous. A previously saved page with the full upstream total can be exported directly. For incomplete upstream pages collect the remaining rows first. For a broad upstream search, include the requested entity type and scope as well as exclusions in filters, unless the upstream query already enforced them. Use saved field values to choose the criteria.",
       "properties":{
         "result_id":{"type":"string"},
         "rows_pointer":{"type":"string","description":"JSON Pointer to the business row array, e.g. /structuredContent/rows. Use an empty string for a root array."},
         "text_pointer":{"type":"string","description":"For JSON encoded inside a text block, e.g. /content/0/text. rows_pointer and pagination pointers are relative to the decoded text; column and filter pointers are relative to each row."},
         "total_pointer":{"type":"string","description":"Upstream total if nonstandard"},
         "next_pointer":{"type":"string","description":"Upstream continuation if nonstandard"},
+        "all_remaining_categories":{"type":"boolean","description":"For an exclusion-only export, set true only when every remaining category belongs to the requested population. Otherwise apply the requested positive filters."},
         "expected_rows":{"type":"integer","minimum":0,"description":"Unfiltered total when declared by the source"},
         "columns":{"type":"array","description":"Optional legacy projection. Normally the field bindings in html select the columns.","minItems":1,"maxItems":32,"items":{"type":"object","properties":{"label":{"type":"string"},"pointer":{"type":"string","description":"Field pointer within one row"}},"required":["label","pointer"],"additionalProperties":false}},
         "filters":` + toolresult.TableFiltersSchema + `
@@ -145,6 +146,9 @@ func (t *ServePageTool) InvokableRun(ctx context.Context, argsJSON string, opts 
 	}
 	if counts != nil {
 		response["counts"] = counts
+		if len(counts.ExcludedByFilter) > 0 {
+			response["count_note"] = "excluded_by_filter counts rows first rejected by each table.filters entry in order. Use those counts for the breakdown. excluded_rows is the combined total."
+		}
 	}
 	out, _ := json.Marshal(response)
 	return string(out), nil

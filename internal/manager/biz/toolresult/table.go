@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"slices"
 	"strings"
 
+	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
 	"github.com/ongridio/ongrid/internal/pkg/resultfile"
 	"github.com/ongridio/ongrid/internal/pkg/resultset"
 )
@@ -17,10 +19,11 @@ import (
 type TableSpec struct {
 	ResultID string `json:"result_id"`
 	resultset.Selection
-	TextPointer  string        `json:"text_pointer,omitempty"`
-	Columns      []TableColumn `json:"columns,omitempty"`
-	Filters      []TableFilter `json:"filters,omitempty"`
-	ExpectedRows *int          `json:"expected_rows,omitempty"`
+	TextPointer            string        `json:"text_pointer,omitempty"`
+	Columns                []TableColumn `json:"columns,omitempty"`
+	Filters                []TableFilter `json:"filters,omitempty"`
+	AllRemainingCategories bool          `json:"all_remaining_categories,omitempty"`
+	ExpectedRows           *int          `json:"expected_rows,omitempty"`
 }
 type TableColumn struct {
 	Label   string `json:"label"`
@@ -28,7 +31,7 @@ type TableColumn struct {
 }
 
 // TableFiltersSchema is shared by the row query and HTML export tools.
-const TableFiltersSchema = `{"type":"array","maxItems":32,"description":"All filters must match. Up to 32 field comparisons across all filters. Within one filter, test pointer and or_pointers together: positive operators match any field; negative operators require no field to match.","items":{"type":"object","properties":{"pointer":{"type":"string"},"or_pointers":{"type":"array","maxItems":31,"items":{"type":"string"},"description":"Alternative row fields for the same comparison. Missing or null alternatives do not match; supplied paths must exist somewhere in the source."},"ignore_case":{"type":"boolean","description":"Case-insensitive text comparison, false by default."},"op":{"type":"string","enum":["equals","not_equals","contains","not_contains"]},"value":{"type":"string"}},"required":["pointer","op","value"],"additionalProperties":false}}`
+const TableFiltersSchema = `{"type":"array","maxItems":32,"description":"All filters must match. Up to 32 field comparisons across all filters. Within one filter, test pointer and or_pointers together: positive operators match any field; negative operators require no field to match.","items":{"type":"object","properties":{"pointer":{"type":"string"},"or_pointers":{"type":"array","maxItems":31,"items":{"type":"string"},"description":"Alternative row fields for the same comparison. Missing or null alternatives do not match; supplied paths must exist somewhere in the source."},"ignore_case":{"type":"boolean","description":"Case-insensitive text comparison, false by default."},"op":{"type":"string","enum":["equals","not_equals","contains","not_contains"]},"value":{"type":"string","description":"Preserve the full requested literal for substring filters. Use the exact source value for category equality."}},"required":["pointer","op","value"],"additionalProperties":false}}`
 
 type TableFilter struct {
 	Pointer    string   `json:"pointer"`
@@ -38,9 +41,10 @@ type TableFilter struct {
 	IgnoreCase bool     `json:"ignore_case,omitempty"`
 }
 type TableCounts struct {
-	Source   int `json:"source_rows"`
-	Excluded int `json:"excluded_rows"`
-	Exported int `json:"exported_rows"`
+	Source           int   `json:"source_rows"`
+	Excluded         int   `json:"excluded_rows"`
+	Exported         int   `json:"exported_rows"`
+	ExcludedByFilter []int `json:"excluded_by_filter,omitempty"`
 }
 
 func (s *TableSpec) UnmarshalJSON(data []byte) error {
@@ -85,6 +89,16 @@ func (u *Usecase) tableRows(ctx context.Context, scope Scope, spec TableSpec, ma
 			}
 			spec.Rows, spec.TextPointer = h.RowsPointer, h.TextPointer
 		}
+	} else if spec.TextPointer == "" && isMCPResult(meta.ToolName) {
+		// Receipts describe business row paths relative to the decoded document.
+		// Honor an explicit outer path first; infer only a single text envelope.
+		obj, _ := root.(map[string]any)
+		blocks, _ := obj["content"].([]any)
+		if _, ok := singleMCPText(blocks); ok && obj["structuredContent"] == nil {
+			if _, found := resultfile.Pointer(root, spec.Rows); !found {
+				spec.TextPointer = "/content/0/text"
+			}
+		}
 	}
 	if spec.TextPointer != "" {
 		v, _ := resultfile.Pointer(root, spec.TextPointer)
@@ -117,7 +131,7 @@ func (u *Usecase) tableRows(ctx context.Context, scope Scope, spec TableSpec, ma
 }
 
 func visitMatchingRows(ctx context.Context, rows []any, filters []preparedTableFilter, visit func(any) error) (TableCounts, error) {
-	counts := TableCounts{Source: len(rows)}
+	counts := TableCounts{Source: len(rows), ExcludedByFilter: make([]int, len(filters))}
 	if err := checkAlternativeFields(ctx, rows, filters); err != nil {
 		return counts, err
 	}
@@ -125,11 +139,12 @@ func visitMatchingRows(ctx context.Context, rows []any, filters []preparedTableF
 		if err := ctx.Err(); err != nil {
 			return counts, err
 		}
-		keep, err := tableMatches(row, filters)
+		failed, err := firstFailedFilter(row, filters)
 		if err != nil {
 			return counts, err
 		}
-		if !keep {
+		if failed >= 0 {
+			counts.ExcludedByFilter[failed]++
 			counts.Excluded++
 			continue
 		}
@@ -154,9 +169,18 @@ func (u *Usecase) visitTable(ctx context.Context, scope Scope, spec TableSpec, f
 		return counts, err
 	}
 
+	review := basetool.ArtifactSourceFromContext(ctx) == basetool.ArtifactSourceChat && !spec.AllRemainingCategories && len(filters) > 0 && !slices.ContainsFunc(filters, func(f preparedTableFilter) bool {
+		return f.op == "equals" || f.op == "contains"
+	})
+	// This decoded slice belongs to this visit. Compact matching references
+	// behind the iterator so a scope review needs no second full-size slice.
+	matched := rows[:0]
 	seen := make([]bool, len(fields))
 	values := make([]string, len(fields))
 	counts, err = visitMatchingRows(ctx, rows, filters, func(row any) error {
+		if review {
+			matched = append(matched, row)
+		}
 		for i, field := range fields {
 			val, ok := resultfile.Pointer(row, field)
 			seen[i] = seen[i] || ok
@@ -183,7 +207,45 @@ func (u *Usecase) visitTable(ctx context.Context, scope Scope, spec TableSpec, f
 			return counts, fmt.Errorf("column %q was absent from all selected rows", fields[i])
 		}
 	}
+	if review {
+		if err := reviewRemainingCategories(matched, fields, filters); err != nil {
+			return counts, err
+		}
+	}
 	return counts, nil
+}
+
+// Report contrasting values that actually survived the exclusions. The model
+// has the user's request and can decide whether those categories belong.
+func reviewRemainingCategories(rows []any, columns []string, filters []preparedTableFilter) error {
+	if len(rows) < 2 {
+		return nil
+	}
+	sample := rows
+	if len(rows) > 256 {
+		sample = make([]any, 256)
+		for i := range sample {
+			sample[i] = rows[i*(len(rows)-1)/(len(sample)-1)]
+		}
+	}
+	paths := append(sampleFieldPointers(sample), columns...)
+	slices.Sort(paths)
+	paths = slices.Compact(paths)
+	for _, f := range filters {
+		paths = slices.DeleteFunc(paths, func(p string) bool { return slices.Contains(f.paths, p) })
+	}
+	groups := automaticDistributions(sample, paths)
+	groups = slices.DeleteFunc(groups, func(g fieldCounts) bool {
+		return !slices.ContainsFunc(g.Values, func(v valueCount) bool { return v.Count > 1 })
+	})
+	if len(groups) == 0 {
+		return nil
+	}
+	evidence, err := json.Marshal(groups)
+	if err != nil {
+		return fmt.Errorf("summarize remaining categories: %w", err)
+	}
+	return fmt.Errorf("scope check before publishing: your filters only EXCLUDE rows. %d candidates remain. Among %d examined candidates these other categories remain together: %s. Compare them with the user's requested entity and scope. Add positive filters for the requested categories and keep the exclusions. Set table.all_remaining_categories=true only when the request or upstream selection covers ALL remaining categories", len(rows), len(sample), evidence)
 }
 
 type preparedTableFilter struct {
@@ -257,8 +319,9 @@ func checkAlternativeFields(ctx context.Context, rows []any, filters []preparedT
 	return nil
 }
 
-func tableMatches(row any, filters []preparedTableFilter) (bool, error) {
-	for _, f := range filters {
+// A selected row passes every filter and returns -1.
+func firstFailedFilter(row any, filters []preparedTableFilter) (int, error) {
+	for i, f := range filters {
 		match := false
 		for _, path := range f.paths {
 			v, ok := resultfile.Pointer(row, path)
@@ -266,7 +329,7 @@ func tableMatches(row any, filters []preparedTableFilter) (bool, error) {
 				continue
 			}
 			if !ok {
-				return false, fmt.Errorf("filter field %q is missing", path)
+				return -1, fmt.Errorf("filter field %q is missing", path)
 			}
 			var s string
 			switch x := v.(type) {
@@ -275,7 +338,7 @@ func tableMatches(row any, filters []preparedTableFilter) (bool, error) {
 			case json.Number, bool:
 				s = fmt.Sprint(x)
 			default:
-				return false, fmt.Errorf("filter field %q must be a scalar", path)
+				return -1, fmt.Errorf("filter field %q must be a scalar", path)
 			}
 			if f.ignoreCase {
 				s = strings.ToLower(s)
@@ -291,10 +354,10 @@ func tableMatches(row any, filters []preparedTableFilter) (bool, error) {
 			}
 		}
 		if match == strings.HasPrefix(f.op, "not_") {
-			return false, nil
+			return i, nil
 		}
 	}
-	return true, nil
+	return -1, nil
 }
 
 // RenderTable keeps the original table-only contract for stored workflows and older clients.

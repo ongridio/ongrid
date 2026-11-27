@@ -66,6 +66,15 @@ func discoverRows(root any, base string) (string, []any, error) {
 	return paths[0], rows, nil
 }
 
+func singleMCPText(blocks []any) (string, bool) {
+	if len(blocks) != 1 {
+		return "", false
+	}
+	block, _ := blocks[0].(map[string]any)
+	s, ok := block["text"].(string)
+	return s, ok && block["type"] == "text"
+}
+
 // Native structuredContent takes precedence over MCP display blocks. A JSON
 // text block carries a second pointer relative to the decoded business object.
 func autoTableSource(root any, mcp bool) (*TableSource, []any, error) {
@@ -77,9 +86,8 @@ func autoTableSource(root any, mcp bool) (*TableSource, []any, error) {
 			if len(blocks) != 1 {
 				return nil, nil, fmt.Errorf("multiple or missing MCP content blocks; select text_pointer and rows_pointer explicitly")
 			}
-			block, _ := blocks[0].(map[string]any)
-			s, ok := block["text"].(string)
-			if !ok || block["type"] != "text" {
+			s, ok := singleMCPText(blocks)
+			if !ok {
 				return nil, nil, fmt.Errorf("MCP content is not a JSON text block")
 			}
 			decoded, err := resultset.Decode(strings.NewReader(s))
@@ -114,24 +122,31 @@ func describeSavedTable(raw []byte, mcp, profile bool) *TableSource {
 	if err != nil {
 		return nil
 	}
+	source.SampleFields = sampleFieldPointers(rows)
+	if profile {
+		source.ValueCounts = automaticDistributions(rows, source.SampleFields)
+	}
+	return source
+}
+
+func sampleFieldPointers(rows []any) []string {
 	fields := map[string]bool{}
 	for _, item := range rows[:min(3, len(rows))] {
-		for key := range item.(map[string]any) {
+		obj, _ := item.(map[string]any)
+		for key := range obj {
 			if len(key) <= 256 {
 				fields[fieldPointer(key)] = true
 			}
 		}
 	}
+	var paths []string
 	remaining := 1200
 	for _, name := range slices.Sorted(maps.Keys(fields)) {
 		encoded, _ := json.Marshal(name)
 		if len(encoded)+1 <= remaining {
-			source.SampleFields = append(source.SampleFields, name)
+			paths = append(paths, name)
 			remaining -= len(encoded) + 1
 		}
 	}
-	if profile {
-		source.ValueCounts = automaticDistributions(rows, source.SampleFields)
-	}
-	return source
+	return paths
 }
