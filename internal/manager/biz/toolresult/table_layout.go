@@ -113,7 +113,7 @@ func parseTableLayout(layout string) (*tableLayout, error) {
 				return nil, fmt.Errorf("%s requires a text container such as a td or span", marker)
 			}
 			for child := n.FirstChild; child != nil; child = n.FirstChild {
-				if child.Type != dom.TextNode || strings.TrimSpace(child.Data) != "" {
+				if child.Type != dom.TextNode || (marker == "data-ongrid-field" && strings.TrimSpace(child.Data) != "") {
 					return nil, fmt.Errorf("leave %s empty for the verified source value", marker)
 				}
 				n.RemoveChild(child)

@@ -78,6 +78,8 @@ A row path missing from the outer MCP response can also be resolved relative to 
 
 For a successful MCP result, a bounded excerpt can include `table_source` for a unique array of objects in native structured content or one matching JSON text block. It includes the row count of this capture and field pointers observed in the first three rows. Captures up to 1 MiB with at most 2,000 rows can also include exact counts for selected low-cardinality text fields. Each distribution describes its own field within the saved page. Filtering and export evaluate the actual intersection on the original records.
 
+When a record collection requires a choice, the receipt can include `row_queries` with ready-to-use arguments for indexed native record arrays. Choose the entry matching the request and add the required filters or projections. Suggestions are bounded by the receipt and the 8 MiB row-query limit. Structure mode accepts a pointer to list indexed paths under a particular subtree. In rows mode, `rows_pointer`, `collection_pointer` and `pointer` can specify the same array. Conflicting paths are rejected.
+
 For a unique row array, `read_tool_result` and `query_tool_result` in `rows` mode and `serve_page.table` resolve the business rows from `result_id`. When several arrays are possible, select a candidate using `rows_pointer` and, for encoded text, `text_pointer`. For example, this query counts each status and region among matching rows and returns a small sample.
 
 ```json

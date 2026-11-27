@@ -77,6 +77,7 @@ func TestModelAuthoredPagePublication(t *testing.T) {
 		{"extra tbody", `<table><tbody><tr data-ongrid-row><td data-ongrid-field="/id"></td></tr></tbody><tbody><tr><td>extra</td></tr></tbody></table>`, &spec},
 		{"guessed cell", strings.Replace(row, `/name"></span>`, `/name">guess</span>`, 1), &spec},
 		{"typo field", strings.Replace(row, "/name", "/typo", 1), &spec},
+		{"nested count markup", "<p data-ongrid-count='source_rows'><b>999</b></p><ul>" + row + "</ul>", &spec},
 		{"invalid metric", "<p data-ongrid-count='number'></p><ul>" + row + "</ul>", &spec},
 		{"field outside row", "<p data-ongrid-field='/name'></p><ul>" + row + "</ul>", &spec},
 		{"inert prototype", "<template><ul>" + row + "</ul></template>", &spec},
@@ -102,7 +103,7 @@ func TestModelAuthoredPagePublication(t *testing.T) {
 	if existing, err := store.List(ctx); err != nil || len(existing) != 0 {
 		t.Fatalf("invalid pages persisted: %v %v", existing, err)
 	}
-	layout := `<!doctype html><main><h1>Inventory</h1><p><span data-ongrid-count="source_rows"></span>/<span data-ongrid-count="excluded_rows"></span>/<span data-ongrid-count="exported_rows"></span></p><ul>` + row + `</ul></main>`
+	layout := `<!doctype html><main><h1>Inventory</h1><p><span data-ongrid-count="source_rows">999</span>/<span data-ongrid-count="excluded_rows"></span>/<span data-ongrid-count="exported_rows"></span></p><ul>` + row + `</ul></main>`
 	for _, empty := range []bool{false, true} {
 		selection := spec
 		if empty {

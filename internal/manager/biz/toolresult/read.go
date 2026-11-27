@@ -78,7 +78,7 @@ func (u *Usecase) Read(ctx context.Context, scope Scope, req Request, query bool
 	if !query && (req.Contains != "" || len(req.EqualsJSON) > 0 || req.Count) {
 		return nil, errs.ErrInvalid
 	}
-	if req.Mode != "json" && (len(req.Fields) > 0 || len(req.EqualsJSON) > 0 || req.Collection != "") {
+	if req.Mode != "json" && (len(req.Fields) > 0 || len(req.EqualsJSON) > 0 || (req.Mode != "structure" && req.Collection != "")) {
 		return nil, errs.ErrInvalid
 	}
 	if len(req.EqualsJSON) > 0 && !json.Valid([]byte(req.EqualsJSON)) {
@@ -170,7 +170,7 @@ func (u *Usecase) structurePage(ctx context.Context, row *model.Result, req Requ
 	// Older file-backed indexes lack native values and most text locations.
 	// Rediscover them only when the payload fits a single reader scan.
 	rebuildIndex := idx.PathIndexStatus == "" && row.ContentType == "application/json" && row.CapturedBytes <= ScanLimit
-	describeRows := offset == 0 && isMCPResult(row.ToolName) && row.ExecutionStatus == "success" && row.CaptureStatus == "complete" && row.CapturedBytes <= maxTextTableHintBytes && (rebuildIndex || len(idx.Collections) > 0)
+	describeRows := req.Collection == "" && offset == 0 && isMCPResult(row.ToolName) && row.ExecutionStatus == "success" && row.CaptureStatus == "complete" && row.CapturedBytes <= maxTextTableHintBytes && (rebuildIndex || len(idx.Collections) > 0)
 	if rebuildIndex || describeRows {
 		f, err := u.repo.Open(ctx, row)
 		if err != nil {
@@ -203,6 +203,11 @@ func (u *Usecase) structurePage(ctx context.Context, row *model.Result, req Requ
 		kinds[path] = "array"
 	}
 	paths := sortedPointers(slices.Collect(maps.Keys(kinds)))
+	if req.Collection != "" {
+		paths = slices.DeleteFunc(paths, func(path string) bool {
+			return path != req.Collection && !strings.HasPrefix(path, req.Collection+"/")
+		})
+	}
 	if offset > int64(len(paths)) {
 		return errs.ErrInvalid
 	}

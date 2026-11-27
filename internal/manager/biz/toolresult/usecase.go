@@ -121,6 +121,13 @@ func (u *Usecase) Open(ctx context.Context, scope Scope, id string) (*model.Resu
 	return r, f, err
 }
 
+// RowQueryHint can be passed directly to query_tool_result.
+type RowQueryHint struct {
+	ResultID    string `json:"result_id"`
+	Mode        string `json:"mode"`
+	RowsPointer string `json:"rows_pointer"`
+}
+
 type View struct {
 	Operation          *basetool.Operation `json:"operation,omitempty"`
 	Kind               string              `json:"kind"`
@@ -139,6 +146,7 @@ type View struct {
 	Preview            string              `json:"preview,omitempty"`
 	StructuredContent  json.RawMessage     `json:"structuredContent,omitempty"`
 	AmbiguousRowSource bool                `json:"ambiguous_row_source,omitempty"`
+	RowQueries         []RowQueryHint      `json:"row_queries,omitempty"`
 	TableSource        *TableSource        `json:"table_source,omitempty"`
 	Instruction        string              `json:"instruction,omitempty"`
 }
@@ -212,6 +220,9 @@ func encodeView(v View) string {
 			paths := sortedPointers(slices.Collect(maps.Keys(v.ValuePointers)))
 			delete(v.ValuePointers, paths[len(paths)-1])
 			v.MoreIndexedPaths = true
+		case len(v.RowQueries) > 1:
+			v.RowQueries = v.RowQueries[:len(v.RowQueries)-1]
+			v.MoreIndexedPaths = true
 		case len(v.CollectionPointers) > 0:
 			v.MoreIndexedPaths = true
 			v.CollectionPointers = v.CollectionPointers[:len(v.CollectionPointers)-1]
@@ -274,7 +285,7 @@ func (u *Usecase) Capture(ctx context.Context, scope Scope, executionID, tool, o
 			instruction += " For an HTML list, write the complete page and CSS in serve_page.html. Bind one data-ongrid-row with data-ongrid-field elements to this result_id, rows_pointer and filters in serve_page.table. Use data-ongrid-count for totals."
 		}
 		if u.analyzer != nil {
-			instruction += " For custom calculations, joins or nested formats, use analyze_tool_results to evaluate jq expressions over the complete saved inputs."
+			instruction += " For custom calculations or joins, use analyze_tool_results to evaluate jq expressions over the complete saved inputs."
 		}
 	}
 	v := View{Kind: "tool_result", ResultID: row.ID, Status: status, ExecutionStatus: executionStatus, CaptureStatus: row.CaptureStatus, StorageStatus: "ready", ViewStatus: "excerpt", CapturedBytes: int64(len(raw)), Preview: prefix(string(raw), 2048), Instruction: instruction}
@@ -300,8 +311,10 @@ func (u *Usecase) Capture(ctx context.Context, scope Scope, executionID, tool, o
 			return output
 		}
 	}
+	var idx resultfile.Index
 	if row.ContentType == "application/json" {
-		idx, indexErr := u.repo.Index(writeCtx, row)
+		var indexErr error
+		idx, indexErr = u.repo.Index(writeCtx, row)
 		if indexErr != nil {
 			v.PathIndexPartial = true
 			u.log.WarnContext(writeCtx, "cannot describe saved result index", "result_id", row.ID, "err", indexErr)
@@ -329,9 +342,36 @@ func (u *Usecase) Capture(ctx context.Context, scope Scope, executionID, tool, o
 		}
 		if v.TableSource != nil {
 			v.Instruction = "See saved_row_value_counts for individual field distributions. " + rowSelectionHint + " For HTML, send your layout and table.result_id with the complete filters to serve_page. For examples or to check their intersection, use query_tool_result mode=rows. Omit row paths for a unique collection."
+		} else if len(raw) <= ScanLimit {
+			for _, path := range v.CollectionPointers {
+				if (path == "/structuredContent" || strings.HasPrefix(path, "/structuredContent/")) && indexedRecordArray(raw, idx.Collections[path]) {
+					v.RowQueries = append(v.RowQueries, RowQueryHint{ResultID: row.ID, Mode: "rows", RowsPointer: path})
+				}
+			}
+			if len(v.RowQueries) > 0 {
+				v.Instruction = "For a record list, choose the row_queries entry matching the requested population and pass it to query_tool_result. Add filters, fields or group_by as needed. For HTML, pass the same result_id, rows_pointer and filters inside serve_page.table with your HTML in serve_page.html. Use structure mode for more indexed paths."
+			} else if len(raw) > maxTextTableHintBytes && len(v.TextPointers) > 0 {
+				v.Instruction += " For records encoded in MCP text, first call query_tool_result with mode=rows and result_id. It discovers the record collection or reports the candidate paths."
+			}
+		} else if hasBusinessArray(v) {
+			v.Instruction += " This result exceeds the rows query size limit. For a bounded sample use read_tool_result mode=json with the matching indexed collection_pointer. For calculations over that array, stream its individual elements using format=json when analysis is available."
 		}
 	}
 	return encodeView(v)
+}
+
+// The index points at original JSON tokens. Classify complete arrays without
+// decoding a second copy of the payload or treating display blocks as rows.
+func indexedRecordArray(raw []byte, collection resultfile.Collection) bool {
+	if !collection.Complete {
+		return false
+	}
+	for _, item := range collection.Items {
+		if item.Start < 0 || item.Start >= int64(len(raw)) || raw[item.Start] != '{' {
+			return false
+		}
+	}
+	return true
 }
 
 // Fit the business payload independently of the MCP display text. Keep the

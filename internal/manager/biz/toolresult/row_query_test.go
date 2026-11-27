@@ -106,6 +106,14 @@ func TestRowQueryBoundsAndAmbiguity(t *testing.T) {
 	if out, err := run(two, `"rows_pointer":"/b","fields":["x"]`); err != nil || !strings.Contains(out, `"/x":2`) {
 		t.Fatal(out, err)
 	}
+	for _, key := range []string{"pointer", "collection_pointer"} {
+		if out, err := run(two, fmt.Sprintf(`"%s":"/b","fields":["x"]`, key)); err != nil || !strings.Contains(out, `"/x":2`) {
+			t.Fatal(out, err)
+		}
+		if _, err := run(two, fmt.Sprintf(`"%s":"/b","rows_pointer":""`, key)); err == nil || !strings.Contains(err.Error(), "conflict") {
+			t.Fatal(err)
+		}
+	}
 	if _, err := run(`{"items":[{"x":1}],"total":9}`, `"group_by":["x"]`); err == nil || !strings.Contains(err.Error(), "incomplete collection") {
 		t.Fatal(err)
 	}
@@ -267,5 +275,37 @@ func TestMCPRowSourcesAcrossContentBlocks(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestIndexedRowQueriesAreExecutable(t *testing.T) {
+	u, _, _, scope := fixture(t)
+	ctx := toolcapture.WithState(context.Background())
+	// Deliberately exceed the profile limit. Only the actual record arrays are offered.
+	raw := []byte(`{"content":[{"type":"text","text":"display only"}],"structuredContent":{"board":{"a/b":[{"key":"active"}],"archive":[{"key":"old"}],"tags":["v1"],"mixed":[{},42]},"padding":"` + strings.Repeat("z", 1<<20) + `"}}`)
+	toolcapture.Raw(ctx, raw, false)
+	encoded := u.Capture(ctx, scope, uuid.NewString(), "mcp__test__board", "display only", nil, nil)
+	var v biz.View
+	if err := json.Unmarshal([]byte(encoded), &v); err != nil || len(encoded) > biz.ViewLimit || len(v.RowQueries) != 2 {
+		t.Fatal(encoded, err)
+	}
+	bag := u.BindTools(scope, nil)
+	wantValues := map[string]string{"/structuredContent/board/a~1b": "active", "/structuredContent/board/archive": "old"}
+	for _, hint := range v.RowQueries {
+		args, err := json.Marshal(hint)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, err := bag[1].InvokableRun(ctx, string(args))
+		want := wantValues[hint.RowsPointer]
+		delete(wantValues, hint.RowsPointer)
+		if err != nil || want == "" || !strings.Contains(out, `"key":"`+want+`"`) {
+			t.Fatal(string(args), out, err)
+		}
+	}
+	args := fmt.Sprintf(`{"mode":"structure","result_id":%q,"pointer":"/structuredContent/board/a~1b"}`, v.ResultID)
+	out, err := bag[0].InvokableRun(ctx, args)
+	if err != nil || !strings.Contains(out, "a~1b") || strings.Contains(out, "archive") || strings.Contains(out, "padding") {
+		t.Fatal(out, err)
 	}
 }

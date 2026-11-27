@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -122,54 +121,57 @@ func (t *readerTool) Info(context.Context) (*basetool.ToolInfo, error) {
 		name = "query_tool_result"
 		desc = "Search saved tool evidence using literal contains or exact JSON field equality. Scan is bounded; count describes only scan_start..scan_end. Continue with cursor only when more evidence is needed."
 	}
-	desc += " Use mode=rows with result_id alone to sample decoded business records. For field distributions use query_tool_result with group_by (field names or JSON Pointers); multiple groups are independent distributions. Supply serve_page-style filters for exact matched_rows and fields for projected samples. No jq or wrapper pointers are needed for a unique array."
-	return &basetool.ToolInfo{Name: name, Class: "read", Description: desc, Parameters: json.RawMessage(`{"type":"object","properties":{"result_id":{"type":"string"},"mode":{"type":"string","enum":["bytes","lines","json","structure","rows"]},"start":{"type":"integer","minimum":0},"cursor":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":200,"description":"Rows mode returns at most 5 sample rows; counts cover all matching rows"},"collection_pointer":{"type":"string","description":"JSON Pointer to an indexed array; empty for root array"},"pointer":{"type":"string","description":"Alias for collection_pointer. Supplying either selects JSON mode by default."},"rows_pointer":{"type":"string","description":"Rows mode: use only to disambiguate multiple row arrays"},"text_pointer":{"type":"string","description":"Rows mode: optional outer JSON string location"},"group_by":{"type":"array","items":{"type":"string"},"maxItems":8,"description":"Rows mode: independent value counts for these fields over all matching rows"},"filters":` + TableFiltersSchema + `,"fields":{"type":"array","items":{"type":"string"},"maxItems":32},"contains":{"type":"string","maxLength":512},"filter_pointer":{"type":"string"},"equals_json":{"type":"string","description":"Exact JSON literal for filter_pointer, encoded as text to preserve large integers","maxLength":1024},"count":{"type":"boolean"}},"required":["result_id"],"additionalProperties":false}`)}, nil
+	desc += " In structure mode an optional pointer lists just that subtree. Use mode=rows with result_id alone to sample decoded business records. For field distributions use query_tool_result with group_by (field names or JSON Pointers); multiple groups are independent distributions. Supply serve_page-style filters for exact matched_rows and fields for projected samples. No jq or wrapper pointers are needed for a unique array."
+	return &basetool.ToolInfo{Name: name, Class: "read", Description: desc, Parameters: json.RawMessage(`{"type":"object","properties":{"result_id":{"type":"string"},"mode":{"type":"string","enum":["bytes","lines","json","structure","rows"]},"start":{"type":"integer","minimum":0},"cursor":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":200,"description":"Rows mode returns at most 5 sample rows; counts cover all matching rows"},"collection_pointer":{"type":"string","description":"JSON Pointer to an indexed array; empty for root array"},"pointer":{"type":"string","description":"Alias for collection_pointer. Supplying either selects JSON mode by default."},"rows_pointer":{"type":"string","description":"Rows mode: select one of multiple candidate arrays. collection_pointer and pointer are accepted aliases."},"text_pointer":{"type":"string","description":"Rows mode: optional outer JSON string location"},"group_by":{"type":"array","items":{"type":"string"},"maxItems":8,"description":"Rows mode: independent value counts for these fields over all matching rows"},"filters":` + TableFiltersSchema + `,"fields":{"type":"array","items":{"type":"string"},"maxItems":32},"contains":{"type":"string","maxLength":512},"filter_pointer":{"type":"string"},"equals_json":{"type":"string","description":"Exact JSON literal for filter_pointer, encoded as text to preserve large integers","maxLength":1024},"count":{"type":"boolean"}},"required":["result_id"],"additionalProperties":false}`)}, nil
 }
 func (t *readerTool) InvokableRun(ctx context.Context, args string, _ ...basetool.InvokeOption) (string, error) {
 	var op struct {
-		Mode    string          `json:"mode"`
-		GroupBy json.RawMessage `json:"group_by"`
-		Filters json.RawMessage `json:"filters"`
+		arrayPointers
+		Mode     string          `json:"mode"`
+		GroupBy  json.RawMessage `json:"group_by"`
+		Filters  json.RawMessage `json:"filters"`
+		RowsPath *string         `json:"rows_pointer"`
+		TextPath *string         `json:"text_pointer"`
 	}
 	if err := json.Unmarshal([]byte(args), &op); err != nil {
 		return "", err
 	}
-	if op.Mode == "rows" || op.Mode == "" && (op.GroupBy != nil || op.Filters != nil) {
-		var q rowQuery
+	path, err := op.resolve(op.RowsPath)
+	if err != nil {
+		return "", err
+	}
+	if op.Mode == "rows" || op.Mode == "" && (op.GroupBy != nil || op.Filters != nil || op.RowsPath != nil || op.TextPath != nil) {
+		var input struct {
+			rowQuery
+			arrayPointers
+		}
 		d := json.NewDecoder(strings.NewReader(args))
 		d.DisallowUnknownFields()
-		if err := d.Decode(&q); err != nil {
+		if err := d.Decode(&input); err != nil {
 			return "", err
 		}
-		return t.boundedRead(func() (string, int64, error) { return t.queryRows(ctx, q) })
+		if path != nil {
+			input.Rows = *path
+		}
+		return t.boundedRead(func() (string, int64, error) { return t.queryRows(ctx, input.rowQuery) })
 	}
 	var input struct {
 		Request
-		CollectionPath *string `json:"collection_pointer"`
-		Pointer        *string `json:"pointer"`
+		Pointer *string `json:"pointer"`
 	}
 	decoder := json.NewDecoder(strings.NewReader(args))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&input); err != nil {
 		return "", err
 	}
-	if err := decoder.Decode(new(any)); err != io.EOF {
-		return "", fmt.Errorf("invalid trailing reader arguments")
-	}
 	req := input.Request
-	if input.Pointer != nil {
-		if input.CollectionPath != nil && *input.CollectionPath != *input.Pointer {
-			return "", fmt.Errorf("conflicting pointer and collection_pointer; use one array path")
-		}
-		input.CollectionPath = input.Pointer
-	}
-	if input.CollectionPath != nil {
-		req.Collection = *input.CollectionPath
+	if path != nil {
+		req.Collection = *path
 		if req.Mode == "" {
 			req.Mode = "json"
 		}
-		if req.Mode != "json" && req.Collection != "" {
-			return "", fmt.Errorf("collection_pointer requires JSON mode: omit the pointer for bytes/lines, or use mode=json for an indexed array. For business rows encoded inside a text block use mode=rows with just result_id and optional fields; omit collection_pointer")
+		if req.Mode != "json" && req.Mode != "structure" && req.Collection != "" {
+			return "", fmt.Errorf("array pointers require json, structure or rows mode")
 		}
 	}
 	return t.boundedRead(func() (string, int64, error) {
@@ -180,6 +182,24 @@ func (t *readerTool) InvokableRun(ctx context.Context, args string, _ ...basetoo
 		b, err := json.Marshal(p)
 		return string(b), p.ScannedBytes, err
 	})
+}
+
+// Keep presence separate from the empty pointer, which explicitly selects the root.
+type arrayPointers struct {
+	CollectionPath *string `json:"collection_pointer"`
+	Pointer        *string `json:"pointer"`
+}
+
+func (p arrayPointers) resolve(path *string) (*string, error) {
+	for _, alias := range []*string{p.CollectionPath, p.Pointer} {
+		if alias != nil {
+			if path != nil && *path != *alias {
+				return nil, fmt.Errorf("conflicting pointer arguments; select one path")
+			}
+			path = alias
+		}
+	}
+	return path, nil
 }
 
 func (t *readerTool) boundedRead(run func() (string, int64, error)) (string, error) {
