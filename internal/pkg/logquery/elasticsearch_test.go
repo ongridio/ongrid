@@ -1,9 +1,11 @@
 package logquery
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -546,5 +548,133 @@ func TestElasticsearchDuration_UsesFixedIntervalSyntax(t *testing.T) {
 		if got := elasticsearchDuration(input); got != want {
 			t.Fatalf("elasticsearchDuration(%s) = %q, want %q", input, got, want)
 		}
+	}
+}
+
+func TestParseElasticsearchTime(t *testing.T) {
+	wantFrac := time.UnixMilli(1795660618725).Add(408000 * time.Nanosecond).UTC()
+	cases := []struct {
+		name    string
+		input   any
+		want    time.Time
+		wantErr bool
+	}{
+		{
+			name:  "rfc3339nano",
+			input: "2026-08-18T12:00:00.123456Z",
+			want:  time.Date(2026, 8, 18, 12, 0, 0, 123456000, time.UTC),
+		},
+		{
+			name:  "numeric string with fractional millis",
+			input: "1795660618725.408000",
+			want:  wantFrac,
+		},
+		{
+			name:  "integer numeric string with whitespace",
+			input: " 1795660618725 ",
+			want:  time.UnixMilli(1795660618725).UTC(),
+		},
+		{
+			name:  "float64",
+			input: float64(1795660618725),
+			want:  time.UnixMilli(1795660618725).UTC(),
+		},
+		{
+			name:  "json number fractional",
+			input: json.Number("1795660618725.408000"),
+			want:  wantFrac,
+		},
+		{name: "empty", input: "", wantErr: true},
+		{name: "nan", input: "NaN", wantErr: true},
+		{name: "inf", input: "Inf", wantErr: true},
+		{name: "underscore", input: "1_000", wantErr: true},
+		{name: "overflow", input: "1e20", wantErr: true},
+		{name: "invalid string", input: "not-a-timestamp", wantErr: true},
+		{name: "nil", input: nil, wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseElasticsearchTime(tc.input)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("parseElasticsearchTime(%#v) = %v, want error", tc.input, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseElasticsearchTime(%#v) error = %v", tc.input, err)
+			}
+			if !got.Equal(tc.want) {
+				t.Fatalf("parseElasticsearchTime(%#v) = %v, want %v", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDecodeElasticsearchRecordNumericTimestampString(t *testing.T) {
+	raw, err := json.Marshal(map[string]any{
+		"@timestamp":         "1795660618725.408000",
+		"observed_timestamp": "1795660618726",
+		"body":               map[string]any{"text": "otel log line"},
+		"severity_text":      "INFO",
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	record, err := decodeElasticsearchRecord("log-num-ts", raw)
+	if err != nil {
+		t.Fatalf("decodeElasticsearchRecord: %v", err)
+	}
+	wantTS := time.UnixMilli(1795660618725).Add(408000 * time.Nanosecond).UTC()
+	if !record.Timestamp.Equal(wantTS) {
+		t.Fatalf("Timestamp = %v, want %v", record.Timestamp, wantTS)
+	}
+	if !record.ObservedTimestamp.Equal(time.UnixMilli(1795660618726).UTC()) {
+		t.Fatalf("ObservedTimestamp = %v", record.ObservedTimestamp)
+	}
+}
+
+func TestElasticsearchClient_SearchSkipsMalformedHitsAndPreservesPagination(t *testing.T) {
+	var logBuf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/_pit"):
+			writeTestJSON(t, w, map[string]any{"id": "pit-skip-bad"})
+		case r.Method == http.MethodPost && r.URL.Path == "/_search":
+			hits := []any{
+				testElasticsearchHit("good-1", "1795660618725.408000", "healthy log", []any{"2026-08-18T12:00:00Z", 1}),
+				testElasticsearchHit("bad-2", "not-a-timestamp", "corrupt doc", []any{"2026-08-18T11:59:59Z", 2}),
+				testElasticsearchHit("next-page-3", "2026-08-18T11:59:58Z", "next page item", []any{"2026-08-18T11:59:58Z", 3}),
+			}
+			writeTestJSON(t, w, map[string]any{"took": 3, "pit_id": "pit-skip-bad", "hits": map[string]any{"hits": hits}})
+		case r.Method == http.MethodDelete && r.URL.Path == "/_pit":
+			writeTestJSON(t, w, map[string]any{"succeeded": true})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client, err := NewElasticsearchClient(ElasticsearchConfig{
+		Endpoint: server.URL, APIKey: "test-key", AllowInsecureHTTP: true,
+	}, server.Client(), logger)
+	if err != nil {
+		t.Fatalf("NewElasticsearchClient() error = %v", err)
+	}
+	req := validSearchRequest()
+	req.Limit = 2
+	result, err := client.Search(t.Context(), req)
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if len(result.Records) != 1 || result.Records[0].ID != "good-1" {
+		t.Fatalf("Records = %#v, want single good-1 record", result.Records)
+	}
+	if !result.HasMore || result.NextCursor == "" {
+		t.Fatalf("HasMore=%v NextCursor=%q, want preserved pagination", result.HasMore, result.NextCursor)
+	}
+	if !strings.Contains(logBuf.String(), "skip invalid Elasticsearch log hit") || !strings.Contains(logBuf.String(), "bad-2") {
+		t.Fatalf("warning log missing skipped hit context: %s", logBuf.String())
 	}
 }
