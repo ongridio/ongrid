@@ -53,6 +53,28 @@ To export a saved JSON array, call `serve_page` with a table specification. For 
 
 The page tool reads the authorized session result, applies all filters and returns the page link with source, excluded and exported row counts. For JSON inside an MCP text block, use `text_pointer` (such as `/content/0/text`) and a row pointer relative to the decoded text. A reported upstream total or an explicit `expected_rows` is compared with the number of source rows before filtering. Without upstream pagination metadata, the counts cover the selected saved array. A table accepts up to 32 columns, 16 MiB of input and 16 MiB of rendered output. For custom HTML the existing `html` argument remains available.
 
+For a successful MCP result stored as a single JSON text block, the excerpt can include a `table_source` with the decoded array path, the row count in this capture and sample field pointers from the first three rows. Automatic discovery covers captures up to 1 MiB with one unambiguous indexed array of objects. Use `read_tool_result` in `structure` mode to discover these paths on an existing saved result. If a page contains all rows reported by the upstream total, it can be exported in the next tool call.
+
+All filters must pass. Use `or_pointers` when a keyword may occur in several fields, and `ignore_case` for case-insensitive comparisons. For example, this exports rows with “svn” in either the hostname or the description, excluding rows where either ownership field contains “Example Team”.
+
+```json
+{
+  "title": "SVN inventory",
+  "table": {
+    "result_id": "<saved-result-uuid>",
+    "text_pointer": "/content/0/text",
+    "rows_pointer": "/data",
+    "columns": [{"label": "Hostname", "pointer": "/hostname"}],
+    "filters": [
+      {"pointer": "/hostname", "or_pointers": ["/description"], "op": "contains", "value": "svn", "ignore_case": true},
+      {"pointer": "/owner", "or_pointers": ["/department"], "op": "not_contains", "value": "Example Team"}
+    ]
+  }
+}
+```
+
+In a filter with alternatives, missing and null values do not match. On a nonempty source, each specified alternative must exist on at least one row. All filters together can reference up to 32 fields.
+
 ## Recovery and retention
 
 Execution, capture and storage have separate status fields. A tool may have completed even if storing its result failed. Do not repeat a write to retrieve its output.

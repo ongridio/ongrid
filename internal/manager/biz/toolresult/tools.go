@@ -63,7 +63,7 @@ type readerTool struct {
 
 func (t *readerTool) Info(context.Context) (*basetool.ToolInfo, error) {
 	name := "read_tool_result"
-	desc := "Read a bounded page of a saved tool result. Bytes/lines use byte offsets; JSON uses indexed array element offsets. Use structure mode to list indexed arrays, text and native MCP objects or scalars. more_indexed_paths means the preview omits indexed paths. path_index_partial means additional unindexed paths may exist. Select an entry from collection_pointers. For MCP business rows select the matching /structuredContent array; /content holds the MCP display blocks. Keep result_id and cursor; do not load the entire file into context."
+	desc := "Read a bounded page of a saved tool result. Bytes/lines use byte offsets; JSON uses indexed array element offsets. Use structure mode to list indexed arrays, text and native MCP objects or scalars, and discover table_source for rows encoded in MCP text. more_indexed_paths means the preview omits indexed paths. path_index_partial means additional unindexed paths may exist. Select an entry from collection_pointers. For MCP business rows select the matching /structuredContent array; /content holds the MCP display blocks. Keep result_id and cursor; do not load the entire file into context."
 	if t.query {
 		name = "query_tool_result"
 		desc = "Search saved tool evidence using literal contains or exact JSON field equality. Scan is bounded; count describes only scan_start..scan_end. Continue with cursor only when more evidence is needed."
@@ -97,7 +97,7 @@ func (t *readerTool) InvokableRun(ctx context.Context, args string, _ ...basetoo
 			req.Mode = "json"
 		}
 		if req.Mode != "json" && req.Collection != "" {
-			return "", fmt.Errorf("collection_pointer requires JSON mode")
+			return "", fmt.Errorf("collection_pointer requires JSON mode: omit the pointer for bytes/lines, or use mode=json for an indexed array. For an HTML list encoded inside a text block, pass text_pointer and rows_pointer to serve_page.table")
 		}
 	}
 	t.budget.mu.Lock()
