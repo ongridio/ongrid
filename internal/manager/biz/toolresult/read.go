@@ -169,7 +169,7 @@ func (u *Usecase) structurePage(ctx context.Context, row *model.Result, req Requ
 	// Older file-backed indexes lack native values and most text locations.
 	// Rediscover them only when the payload fits a single reader scan.
 	rebuildIndex := idx.PathIndexStatus == "" && row.ContentType == "application/json" && row.CapturedBytes <= ScanLimit
-	describeRows := offset == 0 && isMCPResult(row.ToolName) && row.ExecutionStatus == "success" && row.CaptureStatus == "complete" && row.CapturedBytes <= maxTextTableHintBytes && (rebuildIndex || slices.Contains(idx.TextPointers, "/content/0/text"))
+	describeRows := offset == 0 && isMCPResult(row.ToolName) && row.ExecutionStatus == "success" && row.CaptureStatus == "complete" && row.CapturedBytes <= maxTextTableHintBytes && (rebuildIndex || len(idx.Collections) > 0)
 	if rebuildIndex || describeRows {
 		f, err := u.repo.Open(ctx, row)
 		if err != nil {
@@ -187,7 +187,7 @@ func (u *Usecase) structurePage(ctx context.Context, row *model.Result, req Requ
 			idx = resultfile.BuildIndex(body)
 		}
 		if describeRows {
-			p.TableSource = describeTextTable(body)
+			p.TableSource = describeSavedTable(body, true, true)
 		}
 	}
 	kinds := make(map[string]string, len(idx.Collections)+len(idx.TextPointers)+len(idx.ValuePointers))
@@ -255,7 +255,7 @@ func (u *Usecase) jsonPage(ctx context.Context, row *model.Result, req Request, 
 	col, ok := idx.Collections[req.Collection]
 	if !ok {
 		paths := visiblePointers(slices.Collect(maps.Keys(idx.Collections)))
-		return fmt.Errorf("%w: structured_query_unavailable for collection_pointer %q; indexed arrays include %q; use structure to list paths or bytes for unindexed data", errs.ErrInvalid, req.Collection, paths)
+		return fmt.Errorf("%w: structured_query_unavailable for collection_pointer %q; indexed arrays include %q; use mode=rows with result_id and no wrapper pointers for decoded business rows, structure to list paths or bytes for unindexed data", errs.ErrInvalid, req.Collection, paths)
 	}
 	if offset > int64(len(col.Items)) {
 		return errs.ErrInvalid

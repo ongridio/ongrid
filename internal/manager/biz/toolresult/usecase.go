@@ -201,6 +201,8 @@ func encodeView(v View) string {
 			v.Preview = prefix(v.Preview, len(v.Preview)/2)
 		case v.TableSource != nil && len(v.TableSource.SampleFields) > 0:
 			v.TableSource.SampleFields = v.TableSource.SampleFields[:len(v.TableSource.SampleFields)-1]
+		case v.TableSource != nil && len(v.TableSource.ValueCounts) > 0:
+			v.TableSource.ValueCounts = v.TableSource.ValueCounts[:len(v.TableSource.ValueCounts)-1]
 		case len(v.TextPointers) > 0:
 			v.MoreIndexedPaths = true
 			v.TextPointers = v.TextPointers[:len(v.TextPointers)-1]
@@ -267,7 +269,7 @@ func (u *Usecase) Capture(ctx context.Context, scope Scope, executionID, tool, o
 		instruction += " The source or capture limit omitted data; saved evidence is incomplete and cannot establish whole-dataset counts or absence."
 	} else {
 		if status == "success" && tool != "analyze_tool_results" {
-			instruction += " For an HTML list, pass this result_id, rows_pointer, columns and filters directly to serve_page.table. It verifies pagination, applies the filters and returns row counts."
+			instruction += " For an HTML list, write the complete page and CSS in serve_page.html. Bind one data-ongrid-row with data-ongrid-field elements to this result_id, rows_pointer and filters in serve_page.table. Use data-ongrid-count for totals."
 		}
 		if u.analyzer != nil {
 			instruction += " For custom calculations, joins or nested formats, use analyze_tool_results to evaluate jq expressions over the complete saved inputs."
@@ -318,12 +320,9 @@ func (u *Usecase) Capture(ctx context.Context, scope Scope, executionID, tool, o
 		v.Instruction += " For this saved analysis use json_text at /stdout with collection_pointer /values or /coverage."
 	}
 	if isMCPResult(tool) && status == "success" && row.CaptureStatus == "complete" {
-		v.TableSource = describeTextTable(raw)
+		v.TableSource = describeSavedTable(raw, true, true)
 		if v.TableSource != nil {
-			v.Instruction = "For an HTML list, pass this result_id, table_source.text_pointer and table_source.rows_pointer to serve_page.table with the requested columns and filters. The preview is an excerpt. Reuse the saved rows directly. Keep the requested search scope; use or_pointers for alternative fields and ignore_case when appropriate. saved_rows counts this capture. The exporter checks upstream totals and pagination and returns counts."
-			if u.analyzer != nil {
-				v.Instruction += " For custom analysis, use json_text with text_pointer as pointer and rows_pointer as collection_pointer. Each inputs record has the business row under .value."
-			}
+			v.Instruction = "Use saved_row_value_counts for exact individual field distributions within this capture. For a complete HTML list, choose the requested filters from those values and call serve_page directly with your own HTML/CSS, field and count bindings, and table.result_id plus filters. The exporter applies all filters to each source row and verifies pagination. If field relationships or examples are needed, use query_tool_result once with mode=rows, group_by and/or fields and filters. It resolves the business rows by result_id. The preview is an excerpt."
 		}
 	}
 	return encodeView(v)
@@ -339,9 +338,20 @@ func inlineMCPResult(v View, raw []byte, output string, small bool) (string, boo
 		return output, small
 	}
 	if len(mcp.Structured) == 0 || string(mcp.Structured) == "null" {
-		return output, small || (v.Status == "success" && len(output) <= ViewLimit && isCompleteMCPText(raw, output))
+		direct := small || (v.Status == "success" && len(output) <= ViewLimit && isCompleteMCPText(raw, output))
+		if direct && v.Status == "success" && json.Valid([]byte(output)) {
+			if h := describeSavedTable(raw, true, false); h != nil {
+				// Preserve the full business JSON and a usable export reference together when they fit.
+				v.TableSource, v.Preview, v.Instruction, v.ViewStatus = h, output, "", "inline"
+				if body, err := json.Marshal(v); err == nil && len(body) <= ViewLimit {
+					return string(body), true
+				}
+			}
+		}
+		return output, direct
 	}
-	if small && string(mcp.Structured) == output {
+	direct := small && string(mcp.Structured) == output
+	if direct && (v.Status != "success" || len(resultfile.BuildIndex(mcp.Structured).Collections) == 0) {
 		return output, true
 	}
 	if v.Status != "success" {
@@ -353,7 +363,7 @@ func inlineMCPResult(v View, raw []byte, output string, small bool) (string, boo
 	v.Preview = ""
 	b, err := json.Marshal(v)
 	if err != nil || len(b) > ViewLimit {
-		return "", false
+		return output, direct
 	}
 	if string(mcp.Structured) != output {
 		v.Preview = prefix(output, max(0, ViewLimit-len(b)-len(`,"preview":""`)))

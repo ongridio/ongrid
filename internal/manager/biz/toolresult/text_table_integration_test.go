@@ -123,13 +123,14 @@ func TestSingleTurnExportFromMCPText(t *testing.T) {
 				return nil, fmt.Errorf("missing decoded table source: %+v", h)
 			}
 			resultID = v.ResultID
-			spec := toolresult.TableSpec{ResultID: resultID, TextPointer: h.TextPointer, Selection: resultset.Selection{Rows: h.RowsPointer}, Columns: []toolresult.TableColumn{{Label: "ID", Pointer: "/ID"}},
+			spec := toolresult.TableSpec{ResultID: resultID, TextPointer: h.TextPointer, Selection: resultset.Selection{Rows: h.RowsPointer},
 				Filters: []toolresult.TableFilter{
 					{Pointer: "/逻辑区域", Op: "equals", Value: "研发区"},
 					{Pointer: "/主机名", OrPointers: []string{"/显示名称", "/应用描述"}, Op: "contains", Value: "SVN", IgnoreCase: true},
 					{Pointer: "/应用管理员部门", OrPointers: []string{"/系统运维管理员部门"}, Op: "not_contains", Value: "测试排除部门"},
 				}}
-			args, err := json.Marshal(map[string]any{"title": "测试清单", "table": spec})
+			layout := `<!doctype html><html lang="zh"><head><style>.asset{border-inline-start:4px solid teal}</style></head><body><main><h1>研发 SVN 清单</h1><p>导出 <strong data-ongrid-count="exported_rows"></strong> 条</p><section><article class="asset" data-ongrid-row><h2><span data-ongrid-field="/ID"></span></h2><p>部门 <strong data-ongrid-field="/应用管理员部门"></strong></p></article></section></main></body></html>`
+			args, err := json.Marshal(map[string]any{"title": "测试清单", "html": layout, "table": spec})
 			return call("serve_page", string(args)), err
 		case 3:
 			var receipt struct {
@@ -162,11 +163,11 @@ func TestSingleTurnExportFromMCPText(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if calls.Load() != 1 || step != 3 || out.AssistantMessage.Content != "/pages/"+pageID || strings.Count(string(html), "<td>") != 73 {
+	if calls.Load() != 1 || step != 3 || out.AssistantMessage.Content != "/pages/"+pageID || strings.Count(string(html), `<article class="asset" data-ongrid-row="">`) != 73 || !strings.Contains(string(html), `<strong data-ongrid-count="exported_rows">73</strong>`) || !strings.Contains(string(html), `.asset{border-inline-start:4px solid teal}`) {
 		t.Fatal("unexpected calls or table length")
 	}
 	for i := range rows {
-		if strings.Contains(string(html), fmt.Sprintf("<td>asset-%03d</td>", i)) != (i < 73) {
+		if strings.Contains(string(html), fmt.Sprintf(`<h2><span data-ongrid-field="/ID">asset-%03d</span></h2>`, i)) != (i < 73) {
 			t.Fatalf("incorrect membership of row %d", i)
 		}
 	}

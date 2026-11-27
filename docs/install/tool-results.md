@@ -36,7 +36,7 @@ The excerpt view lists arrays in `collection_pointers`, strings in `text_pointer
 | --- | --- |
 | MCP business records in a JSON array | Use the matching `/structuredContent/…` path. Both tools accept `pointer`. The reader also accepts `collection_pointer` and infers JSON mode. |
 | MCP display blocks | Select `/content` to read or count the blocks. A single block can describe many business records. |
-| JSON encoded in a string | Use analysis format `json_text`, set `pointer` to the string, and set `collection_pointer` to the array inside the decoded JSON. |
+| JSON encoded in a string | Use analysis format `json_text`, set `pointer` to the string, and set `collection_pointer` to the array inside the decoded JSON. The corresponding `text_pointer` and `rows_pointer` from the saved receipt are accepted aliases. |
 | Single JSON object or scalar | Use analysis format `json_value`. It emits one record and applies the 1 MiB record limit. |
 
 ## Complete lists and HTML exports
@@ -45,31 +45,41 @@ For a complete list from a read-only MCP query with a cursor, page number or off
 
 The saved aggregate exposes `/structuredContent/rows`. Page and offset queries require an upstream total. Cursor queries follow the cursor to its end and verify a supplied total. Missing rows, repeating cursors or pages, and upstream failures produce partial evidence. One collection runs for up to a minute, with at most 100 pages, 100,000 rows and 16 MiB of business response data.
 
-To export a saved JSON array, call `serve_page` with a table specification. For example:
-
-```json
-{"title":"Inventory","table":{"result_id":"<saved-result-uuid>","rows_pointer":"/structuredContent/rows","columns":[{"label":"Host","pointer":"/hostname"},{"label":"Department","pointer":"/department"}],"filters":[{"pointer":"/department","op":"not_equals","value":"Retired"}]}}
-```
-
-The page tool reads the authorized session result, applies all filters and returns the page link with source, excluded and exported row counts. For JSON inside an MCP text block, use `text_pointer` (such as `/content/0/text`) and a row pointer relative to the decoded text. A reported upstream total or an explicit `expected_rows` is compared with the number of source rows before filtering. Without upstream pagination metadata, the counts cover the selected saved array. A table accepts up to 32 columns, 16 MiB of input and 16 MiB of rendered output. For custom HTML the existing `html` argument remains available.
-
-For a successful MCP result stored as a single JSON text block, the excerpt can include a `table_source` with the decoded array path, the row count in this capture and sample field pointers from the first three rows. Automatic discovery covers captures up to 1 MiB with one unambiguous indexed array of objects. Use `read_tool_result` in `structure` mode to discover these paths on an existing saved result. If a page contains all rows reported by the upstream total, it can be exported in the next tool call.
-
-All filters must pass. Use `or_pointers` when a keyword may occur in several fields, and `ignore_case` for case-insensitive comparisons. For example, this exports rows with “svn” in either the hostname or the description, excluding rows where either ownership field contains “Example Team”.
+For a saved inventory, pass the model-authored `html` and its `table` source in the same `serve_page` call. The model writes the page, its CSS, the headers and one example of the repeated layout. Each record can be a table row, list item or card. For example, this document renders one card per selected host and displays the verified count.
 
 ```json
 {
-  "title": "SVN inventory",
-  "table": {
-    "result_id": "<saved-result-uuid>",
-    "text_pointer": "/content/0/text",
-    "rows_pointer": "/data",
-    "columns": [{"label": "Hostname", "pointer": "/hostname"}],
-    "filters": [
-      {"pointer": "/hostname", "or_pointers": ["/description"], "op": "contains", "value": "svn", "ignore_case": true},
-      {"pointer": "/owner", "or_pointers": ["/department"], "op": "not_contains", "value": "Example Team"}
-    ]
-  }
+  "title": "Inventory",
+  "html": "<!doctype html><html><head><title>Inventory</title><style>.asset{border-inline-start:3px solid teal;padding:1rem}</style></head><body><h1>Inventory</h1><p>Hosts: <strong data-ongrid-count='exported_rows'></strong></p><section><article class='asset' data-ongrid-row><h2><span data-ongrid-field='/hostname'></span></h2><p>Department: <span data-ongrid-field='/department'></span></p></article></section></body></html>",
+  "table": {"result_id":"<saved-result-uuid>","rows_pointer":"/structuredContent/rows","filters":[{"pointer":"/department","op":"not_equals","value":"Retired"}]}
+}
+```
+
+Place the repeatable element alone in its container, e.g. a `tr` inside a `tbody`. Empty cells or spans with `data-ongrid-field` receive the saved values as escaped text. Use `data-ongrid-count` for source, excluded or exported row totals outside the repeated layout. The tool verifies these bindings and counts. The author supplies the selection criteria, headings and surrounding prose. If the current chat run has received a recognized saved collection, `serve_page` also requests a source when called with an unbound HTML table, article or list. Independent prose pages still accept plain HTML. Stored table-only calls retain the earlier layout for compatibility.
+
+The page tool reads the authorized session result, applies all filters and returns the page link with source, excluded and exported row counts. For JSON inside an MCP text block, use `text_pointer` (such as `/content/0/text`) and a row pointer relative to the decoded text. A reported upstream total or an explicit `expected_rows` is compared with the number of source rows before filtering. Without upstream pagination metadata, the counts cover the selected saved array. A table accepts up to 32 columns, 16 MiB of input and 16 MiB of rendered output. Pages without a saved data source can still use `html` alone.
+
+For a successful MCP result, a bounded excerpt can include `table_source` for a unique array of objects in native structured content or a single JSON text block. It includes the row count of this capture and field pointers observed in the first three rows. Captures up to 1 MiB with at most 2,000 rows can also include exact counts for selected low-cardinality text fields. Each distribution describes its own field within the saved page. Filtering and export evaluate the actual intersection on the original records.
+
+For a unique row array, `read_tool_result` and `query_tool_result` in `rows` mode and `serve_page.table` resolve the business rows from `result_id`. When several arrays are possible, select a candidate using `rows_pointer` and, for encoded text, `text_pointer`. For example, this query counts each status and region among matching rows and returns a small sample.
+
+```json
+{"result_id":"<saved-result-uuid>","mode":"rows","filters":[{"pointer":"/team","op":"equals","value":"Platform"}],"group_by":["status","region"],"fields":["id","status"],"limit":2}
+```
+
+Row queries verify declared upstream pagination and accept up to 8 MiB of saved input. The sample is bounded to five rows and the tool response budget. A group with more than eight distinct values, long or structured values, or insufficient response space has `values_omitted` set. Missing fields are counted separately from null. Exact `matched_rows` is independent of whether samples or distributions fit. Use analysis for custom calculations or joins.
+
+All filters must pass. Use `or_pointers` when a keyword may occur in several fields, and `ignore_case` for case-insensitive comparisons. For example, the following source specification for a model-authored page selects rows with “svn” in either the hostname or the description, excluding rows where either ownership field contains “Example Team”.
+
+```json
+{
+  "result_id": "<saved-result-uuid>",
+  "text_pointer": "/content/0/text",
+  "rows_pointer": "/data",
+  "filters": [
+    {"pointer": "/hostname", "or_pointers": ["/description"], "op": "contains", "value": "svn", "ignore_case": true},
+    {"pointer": "/owner", "or_pointers": ["/department"], "op": "not_contains", "value": "Example Team"}
+  ]
 }
 ```
 

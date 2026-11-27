@@ -41,10 +41,10 @@ func NewServePageTool(s PageStore, results *toolresult.Usecase, log *slog.Logger
 var servePageSchema = json.RawMessage(`{
   "type": "object",
   "properties": {
-    "html": { "type": "string", "description": "完整的 HTML 文档字符串（自带 <html><body>…）。会原样托管。" },
+    "html": { "type": "string", "description": "Write the complete HTML document and CSS for the requested page. For a saved list, also supply table. Design one repeatable element (tr, li, article or div) marked data-ongrid-row alone in its container. Bind empty cells or spans with data-ongrid-field (a row JSON Pointer). Example: <tbody><tr data-ongrid-row><td data-ongrid-field=\"/name\"></td></tr></tbody>. Put verified totals in empty spans with data-ongrid-count=\"exported_rows\", \"excluded_rows\" or \"source_rows\" outside the row. Use these bindings for records and metrics; sample rows and hardcoded totals can be inaccurate." },
     "title": { "type":"string", "description":"Page title" },
     "table": {
-      "type":"object","description":"Generate the entire table directly from a saved result. Use this for complete lists and inventory exports. Never page through rows to compose HTML. Use table_source from the saved result when available. A previously saved page with the full upstream total can be exported directly. For incomplete upstream pages collect the remaining rows first. Apply the requested selection only; describe the chosen fields if the wording is ambiguous.",
+      "type":"object","description":"Bind a saved result to your HTML design. Include both html and table for complete lists and inventory exports. A unique business row array is resolved automatically from result_id; supply explicit paths when ambiguous. A previously saved page with the full upstream total can be exported directly. For incomplete upstream pages collect the remaining rows first. Apply the requested selection only; describe the chosen fields if the wording is ambiguous.",
       "properties":{
         "result_id":{"type":"string"},
         "rows_pointer":{"type":"string","description":"JSON Pointer to the business row array, e.g. /structuredContent/rows. Use an empty string for a root array."},
@@ -52,22 +52,24 @@ var servePageSchema = json.RawMessage(`{
         "total_pointer":{"type":"string","description":"Upstream total if nonstandard"},
         "next_pointer":{"type":"string","description":"Upstream continuation if nonstandard"},
         "expected_rows":{"type":"integer","minimum":0,"description":"Unfiltered total when declared by the source"},
-        "columns":{"type":"array","minItems":1,"maxItems":32,"items":{"type":"object","properties":{"label":{"type":"string"},"pointer":{"type":"string","description":"Field pointer within one row"}},"required":["label","pointer"],"additionalProperties":false}},
-        "filters":{"type":"array","maxItems":32,"description":"All filters must match. Up to 32 field comparisons across all filters. Within one filter, test pointer and or_pointers together: positive operators match any field; negative operators require no field to match.","items":{"type":"object","properties":{"pointer":{"type":"string"},"or_pointers":{"type":"array","maxItems":31,"items":{"type":"string"},"description":"Alternative row fields for the same comparison. Missing or null alternatives do not match; supplied paths must exist somewhere in the source."},"ignore_case":{"type":"boolean","description":"Case-insensitive text comparison, false by default."},"op":{"type":"string","enum":["equals","not_equals","contains","not_contains"]},"value":{"type":"string"}},"required":["pointer","op","value"],"additionalProperties":false}}
-      },"required":["result_id","rows_pointer","columns"],"additionalProperties":false
+        "columns":{"type":"array","description":"Optional legacy projection. Normally the field bindings in html select the columns.","minItems":1,"maxItems":32,"items":{"type":"object","properties":{"label":{"type":"string"},"pointer":{"type":"string","description":"Field pointer within one row"}},"required":["label","pointer"],"additionalProperties":false}},
+        "filters":` + toolresult.TableFiltersSchema + `
+      },"required":["result_id"],"additionalProperties":false
     }
-  }
+  },
+  "required":["html"],
+  "additionalProperties":false
 }`)
 
 const servePageWhenToUse = "把你生成的 HTML 报告 / 临时状态面板托管成一个可访问的内网链接时用——" +
-	"比如\"把这次巡检结果做成一个网页给我\"。完整清单请传 table 和已保存的 result_id，服务端直接筛选生成全部行。自定义页面可传完整 HTML。" +
+	"比如\"把这次巡检结果做成一个网页给我\"。由你编写页面布局、样式和记录的展示方式。使用已保存的清单时，同时传 html 和 table，将字段和统计数绑定到原始数据。" +
 	"适合一次性的报告页，不是长期应用。"
 
 // Info — Class=write: it publishes a page (side-effecting) but not destructive.
 func (t *ServePageTool) Info(_ context.Context) (*basetool.ToolInfo, error) {
 	return &basetool.ToolInfo{
 		Name:         ToolNameServePage,
-		Description:  "Host a generated HTML page at an internal, shareable URL (a diagnostic report / status panel). Supply either html or a saved-result table. Returns the URL to give the user.",
+		Description:  "Host a generated HTML page at an internal, shareable URL (a diagnostic report / status panel). Write the HTML and CSS. For lists from saved data, bind the verified rows to the page with table. Returns the URL to give the user.",
 		WhenToUse:    servePageWhenToUse,
 		Parameters:   servePageSchema,
 		Class:        "write",
@@ -87,21 +89,38 @@ func (t *ServePageTool) InvokableRun(ctx context.Context, argsJSON string, opts 
 		return "", fmt.Errorf("serve_page: page store not wired")
 	}
 	var in servePageArgs
-	if err := json.Unmarshal([]byte(argsJSON), &in); err != nil {
-		return "", fmt.Errorf("serve_page: bad args: %w", err)
+	decoder := json.NewDecoder(strings.NewReader(argsJSON))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&in); err != nil {
+		return "", fmt.Errorf("serve_page: bad args (put saved-result filters and paths inside table): %w", err)
+	}
+	if strings.TrimSpace(argsJSON[decoder.InputOffset():]) != "" {
+		return "", fmt.Errorf("serve_page: unexpected trailing arguments")
 	}
 	var counts *toolresult.TableCounts
 	if in.Table != nil {
-		if in.HTML != "" || t.results == nil {
-			return "", fmt.Errorf("serve_page: table requires a saved-result reader and cannot be combined with html")
+		if t.results == nil {
+			return "", fmt.Errorf("serve_page: table requires a saved-result reader")
 		}
 		scope := toolresult.Scope{SessionID: basetool.SessionIDFromContext(ctx), UserID: basetool.ResolveOptions(opts).UserID}
-		body, n, err := t.results.RenderTable(ctx, scope, in.Title, *in.Table)
+		var n toolresult.TableCounts
+		var err error
+		if in.HTML != "" {
+			in.HTML, n, err = t.results.RenderTablePage(ctx, scope, in.HTML, *in.Table)
+		} else if basetool.ArtifactSourceFromContext(ctx) == basetool.ArtifactSourceChat {
+			return "", fmt.Errorf("serve_page: write the page in html with a data-ongrid-row and field bindings; pass table alongside it")
+		} else {
+			in.HTML, n, err = t.results.RenderTable(ctx, scope, in.Title, *in.Table)
+		}
 		if err != nil {
 			return "", fmt.Errorf("serve_page: %w", err)
 		}
-		in.HTML = body
 		counts = &n
+	} else if id := toolresult.ChatPageSource(ctx); toolresult.PageNeedsSource(in.HTML, id != "") {
+		if id != "" {
+			return "", fmt.Errorf("serve_page: this run returned a saved collection (%s); bind the intended result in table and keep your HTML layout", id)
+		}
+		return "", fmt.Errorf("serve_page: HTML data bindings require table with the saved result_id and rows_pointer")
 	}
 	if strings.TrimSpace(in.HTML) == "" {
 		return "", fmt.Errorf("serve_page: html is required")
