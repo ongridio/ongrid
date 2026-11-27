@@ -309,3 +309,34 @@ func TestIndexedRowQueriesAreExecutable(t *testing.T) {
 		t.Fatal(out, err)
 	}
 }
+
+func TestRowPreviewExposesCategoriesBeforePublishing(t *testing.T) {
+	u, _, _, scope := fixture(t)
+	source := capture(t, u, scope, `[{"id":1,"kind":"ticket","closed":"no"},{"id":2,"kind":"ticket","closed":"no"},{"id":3,"kind":"alert","closed":"no"},{"id":4,"kind":"archived","closed":"yes"}]`)
+	tool := u.BindTools(scope, nil)[1]
+	for _, tc := range []struct {
+		args           string
+		matched        int
+		wantCategories bool
+	}{
+		{`"fields":["id"],"limit":1`, 4, true},
+		{`"filters":[{"pointer":"/closed","op":"not_equals","value":"yes"}],"limit":1`, 3, true},
+		{`"filters":[{"pointer":"/kind","op":"equals","value":"ticket"}],"limit":1`, 2, false},
+	} {
+		out, err := tool.InvokableRun(context.Background(), fmt.Sprintf(`{"mode":"rows","result_id":%q,%s}`, source, tc.args))
+		var got struct {
+			Matched    int              `json:"matched_rows"`
+			Samples    []map[string]any `json:"sample_rows"`
+			Categories *struct {
+				Examined int             `json:"examined_rows"`
+				Fields   json.RawMessage `json:"field_value_counts"`
+			} `json:"candidate_categories"`
+		}
+		if err != nil || json.Unmarshal([]byte(out), &got) != nil || got.Matched != tc.matched || len(got.Samples) != 1 || (got.Categories != nil) != tc.wantCategories {
+			t.Fatal(out, err)
+		}
+		if c := got.Categories; c != nil && (c.Examined != tc.matched || !strings.Contains(string(c.Fields), `"value":"alert"`) || (tc.matched == 3 && strings.Contains(string(c.Fields), "archived"))) {
+			t.Fatal(out)
+		}
+	}
+}

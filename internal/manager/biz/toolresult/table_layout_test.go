@@ -50,6 +50,21 @@ func TestExclusionOnlyChatExportReviewsRemainingCategories(t *testing.T) {
 	}
 }
 
+func TestFieldBindingWithEmptyClassHint(t *testing.T) {
+	u, _, _, scope := fixture(t)
+	source := capture(t, u, scope, `[{"name":"<North & West>"}]`)
+	for _, attrs := range []string{
+		`data-ongrid-class="" class="tag" data-ongrid-field="/name"`,
+		`data-ongrid-field="/name" class="tag" data-ongrid-class`,
+	} {
+		layout := `<ul><li data-ongrid-row><span ` + attrs + `></span></li></ul>`
+		page, _, err := u.RenderTablePage(context.Background(), scope, layout, toolresult.TableSpec{ResultID: source})
+		if err != nil || strings.Contains(page, "data-ongrid-class") || !strings.Contains(page, `class="tag"`) || !strings.Contains(page, `>&lt;North &amp; West&gt;</span>`) {
+			t.Fatal(page, err)
+		}
+	}
+}
+
 func TestModelAuthoredPagePublication(t *testing.T) {
 	u, _, _, scope := fixture(t)
 	ctx := basetool.WithArtifactSource(basetool.WithSessionID(context.Background(), scope.SessionID), basetool.ArtifactSourceChat)
@@ -75,6 +90,9 @@ func TestModelAuthoredPagePublication(t *testing.T) {
 		{"duplicate prototype", "<ul>" + row + row + "</ul>", &spec},
 		{"extra sample", "<ul>" + row + "<li>extra</li></ul>", &spec},
 		{"extra tbody", `<table><tbody><tr data-ongrid-row><td data-ongrid-field="/id"></td></tr></tbody><tbody><tr><td>extra</td></tr></tbody></table>`, &spec},
+		{"conflicting field and count", strings.Replace(row, `data-ongrid-field="/name"`, `data-ongrid-field="/name" data-ongrid-count="source_rows"`, 1), &spec},
+		{"dynamic class binding", strings.Replace(row, `data-ongrid-field="/name"`, `data-ongrid-field="/name" data-ongrid-class="/id"`, 1), &spec},
+		{"unknown empty binding", strings.Replace(row, `data-ongrid-field="/name"`, `data-ongrid-field="/name" data-ongrid-fild`, 1), &spec},
 		{"guessed cell", strings.Replace(row, `/name"></span>`, `/name">guess</span>`, 1), &spec},
 		{"typo field", strings.Replace(row, "/name", "/typo", 1), &spec},
 		{"nested count markup", "<p data-ongrid-count='source_rows'><b>999</b></p><ul>" + row + "</ul>", &spec},

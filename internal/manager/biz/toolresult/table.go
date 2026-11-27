@@ -183,9 +183,7 @@ func (u *Usecase) visitTable(ctx context.Context, scope Scope, spec TableSpec, f
 		return counts, err
 	}
 
-	review := basetool.ArtifactSourceFromContext(ctx) == basetool.ArtifactSourceChat && !spec.AllRemainingCategories && len(filters) > 0 && !slices.ContainsFunc(filters, func(f preparedTableFilter) bool {
-		return f.op == "equals" || f.op == "contains"
-	})
+	review := basetool.ArtifactSourceFromContext(ctx) == basetool.ArtifactSourceChat && !spec.AllRemainingCategories && onlyExclusions(filters)
 	// This decoded slice belongs to this visit. Compact matching references
 	// behind the iterator so a scope review needs no second full-size slice.
 	matched := rows[:0]
@@ -222,16 +220,31 @@ func (u *Usecase) visitTable(ctx context.Context, scope Scope, spec TableSpec, f
 		}
 	}
 	if review {
-		if err := reviewRemainingCategories(matched, fields, filters); err != nil {
-			return counts, err
+		if categories := remainingCategories(matched, fields, filters); categories != nil {
+			evidence, err := json.Marshal(categories.Fields)
+			if err != nil {
+				return counts, fmt.Errorf("summarize remaining categories: %w", err)
+			}
+			return counts, fmt.Errorf("scope check before publishing: your filters only EXCLUDE rows. %d candidates remain. Among %d examined candidates these other categories remain together: %s. Compare them with the user's requested entity and scope. Add positive filters for the requested categories and keep the exclusions. Set table.all_remaining_categories=true only when the request or upstream selection covers ALL remaining categories", len(matched), categories.Examined, evidence)
 		}
 	}
 	return counts, nil
 }
 
+func onlyExclusions(filters []preparedTableFilter) bool {
+	return len(filters) > 0 && !slices.ContainsFunc(filters, func(f preparedTableFilter) bool {
+		return f.op == "equals" || f.op == "contains"
+	})
+}
+
+type categorySample struct {
+	Examined int           `json:"examined_rows"`
+	Fields   []fieldCounts `json:"field_value_counts"`
+}
+
 // Report contrasting values that actually survived the exclusions. The model
 // has the user's request and can decide whether those categories belong.
-func reviewRemainingCategories(rows []any, columns []string, filters []preparedTableFilter) error {
+func remainingCategories(rows []any, columns []string, filters []preparedTableFilter) *categorySample {
 	if len(rows) < 2 {
 		return nil
 	}
@@ -255,11 +268,7 @@ func reviewRemainingCategories(rows []any, columns []string, filters []preparedT
 	if len(groups) == 0 {
 		return nil
 	}
-	evidence, err := json.Marshal(groups)
-	if err != nil {
-		return fmt.Errorf("summarize remaining categories: %w", err)
-	}
-	return fmt.Errorf("scope check before publishing: your filters only EXCLUDE rows. %d candidates remain. Among %d examined candidates these other categories remain together: %s. Compare them with the user's requested entity and scope. Add positive filters for the requested categories and keep the exclusions. Set table.all_remaining_categories=true only when the request or upstream selection covers ALL remaining categories", len(rows), len(sample), evidence)
+	return &categorySample{Examined: len(sample), Fields: groups}
 }
 
 type preparedTableFilter struct {

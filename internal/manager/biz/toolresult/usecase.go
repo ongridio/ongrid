@@ -341,7 +341,7 @@ func (u *Usecase) Capture(ctx context.Context, scope Scope, executionID, tool, o
 			v.Instruction += " " + prefix(err.Error(), 1024)
 		}
 		if v.TableSource != nil {
-			v.Instruction = "See saved_row_value_counts for individual field distributions. " + rowSelectionHint + " For HTML, send your layout and table.result_id with the complete filters to serve_page. For examples or to check their intersection, use query_tool_result mode=rows. Omit row paths for a unique collection."
+			v.Instruction = "Use the observed field pointers to design columns and saved_row_value_counts to identify the requested categories. " + rowSelectionHint + " When the criteria are clear, call serve_page directly with html and table {result_id, filters}. It computes all counts from the original rows. Use query_tool_result mode=rows only if an example or a field value is still needed. Omit row paths for a unique collection."
 		} else if len(raw) <= ScanLimit {
 			for _, path := range v.CollectionPointers {
 				if (path == "/structuredContent" || strings.HasPrefix(path, "/structuredContent/")) && indexedRecordArray(raw, idx.Collections[path]) {

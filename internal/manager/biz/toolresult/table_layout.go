@@ -63,14 +63,27 @@ func parseTableLayout(layout string) (*tableLayout, error) {
 			continue
 		}
 		var marker, value string
+		emptyClass := false
 		for _, attr := range n.Attr {
 			if !strings.HasPrefix(attr.Key, "data-ongrid-") {
 				continue
 			}
+			if attr.Key == "data-ongrid-class" && attr.Val == "" {
+				emptyClass = true
+				continue
+			}
 			if marker != "" {
-				return nil, errors.New("use one data binding per element")
+				return nil, fmt.Errorf("use one data binding per element: <%s> has both %s and %s; use the ordinary class attribute for styling", n.Data, marker, attr.Key)
 			}
 			marker, value = attr.Key, attr.Val
+		}
+		if emptyClass {
+			if marker != "data-ongrid-field" {
+				return nil, errors.New("use the ordinary class attribute for styling")
+			}
+			// Discard an empty styling hint on a bound field. The actual
+			// class and the escaped field value keep their original meanings.
+			n.Attr = slices.DeleteFunc(n.Attr, func(a dom.Attribute) bool { return a.Key == "data-ongrid-class" && a.Val == "" })
 		}
 		if marker == "" {
 			continue

@@ -132,6 +132,7 @@ type rowAnswer struct {
 	Groups           []fieldCounts    `json:"value_counts,omitempty"`
 	Samples          []map[string]any `json:"sample_rows,omitempty"`
 	SampleLimited    bool             `json:"sample_limited,omitempty"`
+	Categories       *categorySample  `json:"candidate_categories,omitempty"`
 	SelectionHint    string           `json:"selection_hint,omitempty"`
 }
 
@@ -187,9 +188,16 @@ func (t *readerTool) queryRows(ctx context.Context, q rowQuery) (string, int64, 
 	// An unfiltered collection can be sampled across its entire extent in one
 	// pass. Consecutive records are often sorted by type, region or status.
 	limit = min(limit, len(rows))
+	// Each read owns its decoded rows. Retain the surviving references in
+	// place when previewing the same exclusion-only selection as an export.
+	reviewExclusions := onlyExclusions(filters)
+	matched := rows[:0]
 	matchedIndex := -1
 	counts, err := visitMatchingRows(ctx, rows, filters, func(row any) error {
 		matchedIndex++
+		if reviewExclusions {
+			matched = append(matched, row)
+		}
 		for i := range out.Groups {
 			out.Groups[i].add(row)
 		}
@@ -232,6 +240,14 @@ func (t *readerTool) queryRows(ctx context.Context, q rowQuery) (string, int64, 
 			break
 		}
 	}
+	if reviewExclusions {
+		out.Categories = remainingCategories(matched, fields, filters)
+	} else if len(filters) == 0 && len(q.GroupBy) == 0 && limit > 0 && limit < len(rows) {
+		out.Categories = remainingCategories(rows, fields, nil)
+	}
+	if out.Categories != nil {
+		out.SelectionHint = "Check the requested entity and scope against candidate_categories (sampled matching rows). For HTML, apply the supported inclusions and exclusions together in serve_page.table.filters. Query again only if a criterion is unclear."
+	}
 	for {
 		b, err := json.Marshal(out)
 		if err != nil {
@@ -239,6 +255,17 @@ func (t *readerTool) queryRows(ctx context.Context, q rowQuery) (string, int64, 
 		}
 		if len(b) <= ViewLimit {
 			return string(b), scanned, nil
+		}
+		// Optional context yields to explicitly requested samples and groups.
+		if out.Categories != nil {
+			groups := out.Categories.Fields
+			if len(groups) > 1 {
+				out.Categories.Fields = groups[:len(groups)-1]
+			} else {
+				out.Categories = nil
+				out.SelectionHint = rowSelectionHint
+			}
+			continue
 		}
 		if n := len(out.Samples); n > 0 {
 			out.Samples = out.Samples[:n-1]
