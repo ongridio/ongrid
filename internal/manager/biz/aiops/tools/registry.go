@@ -431,7 +431,7 @@ func (r *Registry) BuildBaseTools() *ToolBag {
 		out = append(out, NewSendIMMessageTool(r.imMessageSender, r.log))
 	}
 	if r.pageStore != nil {
-		out = append(out, NewServePageTool(r.pageStore, r.log))
+		out = append(out, NewServePageTool(r.pageStore, r.results, r.log))
 	}
 
 	// 所有消费方共用完整静态目录，避免工作流画布漏掉 host-files。

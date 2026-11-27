@@ -37,6 +37,20 @@ The saved view lists arrays in `collection_pointers`, strings in `text_pointers`
 | JSON encoded in a string | Use analysis format `json_text`, set `pointer` to the string, and set `collection_pointer` to the array inside the decoded JSON. |
 | Single JSON object or scalar | Use analysis format `json_value`. It emits one record and applies the 1 MiB record limit. |
 
+## Complete lists and HTML exports
+
+For a complete list from a read-only MCP query with a cursor, page number or offset in its input schema, the chat tool accepts `ongrid_all_pages`. Set `rows_pointer` to the business array inside `structuredContent` or the JSON in a single text block. Supply `total_pointer` and `next_pointer` for nonstandard response fields, and `id_pointer` when rows have a unique key. The Manager keeps the original query filters on every page. Tools that require approval show the all-pages request as one approval. Single-page calls use the upstream tool as usual.
+
+The saved aggregate exposes `/structuredContent/rows`. Page and offset queries require an upstream total. Cursor queries follow the cursor to its end and verify a supplied total. Missing rows, repeating cursors or pages, and upstream failures produce partial evidence. One collection runs for up to a minute, with at most 100 pages, 100,000 rows and 16 MiB of business response data.
+
+To export a saved JSON array, call `serve_page` with a table specification. For example:
+
+```json
+{"title":"Inventory","table":{"result_id":"<saved-result-uuid>","rows_pointer":"/structuredContent/rows","columns":[{"label":"Host","pointer":"/hostname"},{"label":"Department","pointer":"/department"}],"filters":[{"pointer":"/department","op":"not_equals","value":"Retired"}]}}
+```
+
+The page tool reads the authorized session result, applies all filters and returns the page link with source, excluded and exported row counts. For JSON inside an MCP text block, use `text_pointer` (such as `/content/0/text`) and a row pointer relative to the decoded text. A reported upstream total or an explicit `expected_rows` is compared with the number of source rows before filtering. Without upstream pagination metadata, the counts cover the selected saved array. A table accepts up to 32 columns, 16 MiB of input and 16 MiB of rendered output. For custom HTML the existing `html` argument remains available.
+
 ## Recovery and retention
 
 Execution, capture and storage have separate status fields. A tool may have completed even if storing its result failed. Do not repeat a write to retrieve its output.

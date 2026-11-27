@@ -16,6 +16,7 @@ import (
 	"github.com/cloudwego/eino/compose"
 
 	"github.com/ongridio/ongrid/internal/manager/biz/aiops/tools/basetool"
+	"github.com/ongridio/ongrid/internal/pkg/mcpclient"
 )
 
 // MCPCaller runs an MCP tool synchronously (trusted-server path).
@@ -82,26 +83,8 @@ func sanitizeMCPSeg(s string) string {
 	return b.String()
 }
 
-// MCPToolClass infers an MCP tool's risk class from its name. MCP servers
-// rarely set the readOnlyHint annotation, so we read the verb: pure-read
-// queries (k8s list/get/log/top/stats/view/...) are "read" and can be
-// single-node test-run; anything naming a mutating verb — or unknown — stays
-// "destructive" so it is gated to full-flow runs / approval. Decoupled from the
-// server's `trusted` flag, which governs only the sync-vs-approval run path.
-func MCPToolClass(bareName string) string {
-	n := strings.ToLower(bareName)
-	for _, v := range []string{"delete", "remove", "create", "apply", "exec", "scale", "restart", "patch", "update", "drain", "cordon", "rollout", "evict", "kill", "destroy", "stop", "start", "attach", "write"} {
-		if strings.Contains(n, v) {
-			return "destructive"
-		}
-	}
-	for _, v := range []string{"list", "get", "read", "view", "describe", "log", "top", "stat", "status", "summary", "event", "watch", "search", "info", "query", "show", "fetch", "inspect", "config", "cat", "tail", "head"} {
-		if strings.Contains(n, v) {
-			return "read"
-		}
-	}
-	return "destructive"
-}
+// MCPToolClass returns the execution class used by the chat and flow adapters.
+func MCPToolClass(bareName string) string { return mcpclient.ToolClass(bareName) }
 
 func (t *MCPTool) Info(_ context.Context) (*basetool.ToolInfo, error) {
 	class := MCPToolClass(t.bareName)

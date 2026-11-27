@@ -39,7 +39,7 @@ func (r *MCPToolRefresher) Refresh(ctx context.Context, serverName string, srv *
 		rawTools = make([]aiopstoolsbase.BaseTool, 0, len(discovered))
 		graphTools = make([]aiopstoolsbase.BaseTool, 0, len(discovered))
 		for _, mt := range discovered {
-			raw := aiopstools.NewMCPTool(srv.Name, mt.Name, mt.Description, mt.InputSchema, srv.Trusted, r.caller, r.proposer, r.log)
+			raw := aiopstools.NewMCPTool(srv.Name, mt.Name, mt.Description, mt.ChatInputSchema(), srv.Trusted, r.caller, r.proposer, r.log)
 			rawTools = append(rawTools, raw)
 			deps := r.deps
 			if !srv.Trusted {

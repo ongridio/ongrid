@@ -48,12 +48,17 @@ func NewHTTP(endpoint string, headers map[string]string, timeout time.Duration) 
 	}
 }
 
-// Tool is one entry from tools/list. InputSchema is raw JSON Schema, passed
-// straight to the LLM as the tool's parameters.
+// ToolAnnotations preserves the upstream read-only declaration during discovery.
+type ToolAnnotations struct {
+	ReadOnlyHint *bool `json:"readOnlyHint,omitempty"`
+}
+
+// Tool is one entry in the upstream tools/list catalog.
 type Tool struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	InputSchema json.RawMessage `json:"inputSchema"`
+	Annotations *ToolAnnotations `json:"annotations,omitempty"`
+	Name        string           `json:"name"`
+	Description string           `json:"description"`
+	InputSchema json.RawMessage  `json:"inputSchema"`
 }
 
 // CallResult is the tools/call payload. Content blocks are flattened to text

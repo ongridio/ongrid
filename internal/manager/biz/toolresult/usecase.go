@@ -262,6 +262,9 @@ func (u *Usecase) Capture(ctx context.Context, scope Scope, executionID, tool, o
 	} else if u.analyzer != nil {
 		instruction += " For whole-dataset questions, custom calculations, joins or nested formats, use analyze_tool_results to evaluate jq expressions over the complete saved inputs."
 	}
+	if row.CaptureStatus == "complete" && status == "success" && tool != "analyze_tool_results" {
+		instruction += " For complete HTML lists, pass this result_id, rows_pointer, columns and filters to serve_page.table. Export rows directly without paging them into chat."
+	}
 	v := View{Kind: "tool_result", ResultID: row.ID, Status: status, ExecutionStatus: executionStatus, CaptureStatus: row.CaptureStatus, StorageStatus: "ready", ViewStatus: "excerpt", CapturedBytes: int64(len(raw)), Preview: prefix(string(raw), 2048), Instruction: instruction}
 	v.Operation = captureOperation(tool, output)
 	if err != nil {
