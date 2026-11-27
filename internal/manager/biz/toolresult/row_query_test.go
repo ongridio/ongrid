@@ -68,6 +68,29 @@ func TestRowQueryAndExportSelectSameOriginalRecords(t *testing.T) {
 	}
 }
 
+func TestRowQueryFindsTailRecordOutsideLargeMCPPreview(t *testing.T) {
+	u, _, _, scope := fixture(t)
+	ctx := toolcapture.WithState(context.Background())
+	const ordinary = `{"state":"closed","notes":"Resolved before the reporting period."},`
+	doc := `{"work":{"backlog":[` + strings.Repeat(ordinary, 20000) + `{"state":"open","key":9007199254740993}]}}`
+	blocks := []map[string]string{{"type": "text", "text": "Historical tickets"}, {"type": "text", "text": doc}}
+	raw, err := json.Marshal(map[string]any{"content": blocks})
+	if err != nil {
+		t.Fatal(err)
+	}
+	toolcapture.Raw(ctx, raw, false)
+	view := u.Capture(ctx, scope, uuid.NewString(), "mcp__example__list_tickets", blocks[0]["text"]+"\n"+doc, nil, nil)
+	id := toolcapture.ResultID(ctx)
+	if id == "" || len(view) > biz.ViewLimit || !strings.Contains(view, id) || strings.Contains(view, "9007199254740993") {
+		t.Fatalf("expected a bounded receipt without the final row: %s", view)
+	}
+	args := `{"result_id":"` + id + `","mode":"rows","filters":[{"pointer":"/state","op":"equals","value":"open"}],"fields":["key"]}`
+	result, err := u.BindTools(scope, nil)[1].InvokableRun(ctx, args)
+	if err != nil || !strings.Contains(result, `"source_rows":20001`) || !strings.Contains(result, `"matched_rows":1`) || !strings.Contains(result, "9007199254740993") {
+		t.Fatal(result, err)
+	}
+}
+
 func TestRowQueryBoundsAndAmbiguity(t *testing.T) {
 	u, _, _, scope := fixture(t)
 	ctx := context.Background()
@@ -174,5 +197,75 @@ func TestSavedFieldDistributionsDescribeOnlyCapturedRows(t *testing.T) {
 		if _, err := tool.InvokableRun(ctx, `{"result_id":"`+v.ResultID+`","mode":"rows","group_by":["状态"]}`); err == nil || !strings.Contains(err.Error(), "14 of 20") {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestMCPRowSourcesAcrossContentBlocks(t *testing.T) {
+	const records = `{"paging":{"total":1},"tickets":[{"id":9007199254740993}]}`
+	const another = `{"tickets":[{"id":2}]}`
+	for _, tc := range []struct {
+		name      string
+		texts     []string
+		native    string
+		wantPath  string
+		ambiguous bool
+	}{
+		{"data after prose, image and metadata", []string{"query complete", "", `{"duration":3}`, records}, "", "/content/3/text", false},
+		{"data before prose", []string{records, "query complete"}, "", "/content/0/text", false},
+		{"two data blocks", []string{another, records}, "", "/content/1/text", true},
+		{"native with competing display data", []string{another}, records, "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			u, _, _, scope := fixture(t)
+			ctx := toolcapture.WithState(context.Background())
+			blocks := make([]map[string]string, len(tc.texts))
+			for i, txt := range tc.texts {
+				blocks[i] = map[string]string{"type": "text", "text": txt}
+				if txt == "" {
+					blocks[i] = map[string]string{"type": "image", "data": "AQ==", "mimeType": "image/png"}
+				}
+			}
+			raw := map[string]any{"content": blocks}
+			if tc.native != "" {
+				raw["structuredContent"] = json.RawMessage(tc.native)
+			}
+			body, err := json.Marshal(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			toolcapture.Raw(ctx, body, false)
+			view := u.Capture(ctx, scope, uuid.NewString(), "mcp__example__tickets", strings.Join(tc.texts, "\n"), nil, nil)
+			id := toolcapture.ResultID(ctx)
+			var receipt biz.View
+			if err := json.Unmarshal([]byte(view), &receipt); err != nil || receipt.ResultID != id {
+				t.Fatalf("missing capture reference: %s", view)
+			}
+			if tc.ambiguous {
+				if receipt.TableSource != nil || !strings.Contains(receipt.Instruction, "text_pointer") {
+					t.Fatal(view)
+				}
+			} else if tc.native == "" && (receipt.TableSource == nil || receipt.TableSource.TextPointer != tc.wantPath) {
+				t.Fatal(view)
+			}
+			query := u.BindTools(scope, nil)[1]
+			for _, path := range []string{"", "/tickets"} {
+				spec := biz.TableSpec{ResultID: id}
+				spec.Rows = path
+				args, _ := json.Marshal(map[string]any{"mode": "rows", "result_id": id, "rows_pointer": path, "fields": []string{"id"}})
+				out, err := query.InvokableRun(ctx, string(args))
+				if tc.ambiguous {
+					if err == nil || !strings.Contains(err.Error(), "text_pointer") {
+						t.Fatal(out, err)
+					}
+					spec.TextPointer = tc.wantPath
+				} else if err != nil || !strings.Contains(out, "9007199254740993") {
+					t.Fatal(out, err)
+				}
+				html, counts, err := u.RenderTablePage(ctx, scope, `<ol><li data-ongrid-row><b data-ongrid-field="/id"></b></li></ol>`, spec)
+				if err != nil || counts.Exported != 1 || !strings.Contains(html, ">9007199254740993<") {
+					t.Fatal(html, counts, err)
+				}
+			}
+		})
 	}
 }

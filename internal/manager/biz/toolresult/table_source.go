@@ -3,10 +3,8 @@ package toolresult
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"maps"
 	"slices"
-	"strings"
 
 	"github.com/ongridio/ongrid/internal/pkg/resultset"
 )
@@ -23,110 +21,59 @@ type TableSource struct {
 
 const maxTextTableHintBytes = 1 << 20
 
-func fieldPointer(key string) string {
-	return "/" + strings.ReplaceAll(strings.ReplaceAll(key, "~", "~0"), "/", "~1")
-}
-
-// Identify one array of records without descending into the records themselves.
-// On ambiguity the caller can select a path explicitly, including for older captures.
-func discoverRows(root any, base string) (string, []any, error) {
-	var paths []string
-	var rows []any
-	nodes := 0
-	var walk func(any, string, int) bool
-	walk = func(value any, path string, depth int) bool {
-		nodes++
-		if nodes > 4096 || depth > 12 || len(path) > 1024 || len(paths) >= 12 {
-			return false
+// Keep block positions so the receipt points into the saved tools/call result.
+func mcpBlockTexts(blocks []any) []string {
+	texts := make([]string, len(blocks))
+	for i, item := range blocks {
+		block, _ := item.(map[string]any)
+		if block["type"] == "text" {
+			texts[i], _ = block["text"].(string)
 		}
-		switch v := value.(type) {
-		case map[string]any:
-			for _, key := range slices.Sorted(maps.Keys(v)) {
-				if !walk(v[key], path+fieldPointer(key), depth+1) {
-					return false
-				}
-			}
-		case []any:
-			for _, r := range v {
-				if _, ok := r.(map[string]any); !ok {
-					return true
-				}
-			}
-			paths = append(paths, path)
-			rows = v
-		}
-		return true
 	}
-	if !walk(root, base, 0) {
-		return "", nil, fmt.Errorf("row discovery limit reached; specify rows_pointer")
-	}
-	if len(paths) != 1 {
-		return "", nil, fmt.Errorf("specify rows_pointer; candidate arrays: %q", paths)
-	}
-	return paths[0], rows, nil
+	return texts
 }
 
-func singleMCPText(blocks []any) (string, bool) {
-	if len(blocks) != 1 {
-		return "", false
-	}
-	block, _ := blocks[0].(map[string]any)
-	s, ok := block["text"].(string)
-	return s, ok && block["type"] == "text"
-}
-
-// Native structuredContent takes precedence over MCP display blocks. A JSON
-// text block carries a second pointer relative to the decoded business object.
+// Native structuredContent takes precedence over MCP display blocks.
 func autoTableSource(root any, mcp bool) (*TableSource, []any, error) {
-	base, textPath := "", ""
+	base := ""
 	if obj, ok := root.(map[string]any); ok && mcp {
 		if native := obj["structuredContent"]; native != nil {
 			root, base = native, "/structuredContent"
 		} else if blocks, ok := obj["content"].([]any); ok {
-			if len(blocks) != 1 {
-				return nil, nil, fmt.Errorf("multiple or missing MCP content blocks; select text_pointer and rows_pointer explicitly")
-			}
-			s, ok := singleMCPText(blocks)
-			if !ok {
-				return nil, nil, fmt.Errorf("MCP content is not a JSON text block")
-			}
-			decoded, err := resultset.Decode(strings.NewReader(s))
+			source, err := resultset.SelectTextRows(mcpBlockTexts(blocks), nil, "")
 			if err != nil {
 				return nil, nil, err
 			}
-			root, textPath = decoded, "/content/0/text"
+			return &TableSource{TextPointer: source.TextPointer, RowsPointer: source.RowsPointer, SavedRows: len(source.Rows)}, source.Rows, nil
 		}
 	}
-	path, rows, err := discoverRows(root, base)
+	path, rows, err := resultset.DiscoverRows(root, base)
 	if err != nil {
-		if textPath != "" {
-			return nil, nil, fmt.Errorf("for text_pointer %q: %w", textPath, err)
-		}
 		return nil, nil, err
 	}
-	return &TableSource{TextPointer: textPath, RowsPointer: path, SavedRows: len(rows)}, rows, nil
+	return &TableSource{RowsPointer: path, SavedRows: len(rows)}, rows, nil
 }
 
-func describeSavedTable(raw []byte, mcp, profile bool) *TableSource {
+func describeSavedTable(raw []byte, mcp, profile bool) (*TableSource, error) {
 	if len(raw) > maxTextTableHintBytes {
-		return nil
+		return nil, nil
 	}
 	root, err := resultset.Decode(bytes.NewReader(raw))
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	if obj, ok := root.(map[string]any); ok && mcp && obj["isError"] == true {
-		return nil
+		return nil, nil
 	}
 	source, rows, err := autoTableSource(root, mcp)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	source.SampleFields = sampleFieldPointers(rows)
 	if profile {
 		source.ValueCounts = automaticDistributions(rows, source.SampleFields)
 	}
-	return source
+	return source, nil
 }
 
 func sampleFieldPointers(rows []any) []string {
@@ -135,7 +82,7 @@ func sampleFieldPointers(rows []any) []string {
 		obj, _ := item.(map[string]any)
 		for key := range obj {
 			if len(key) <= 256 {
-				fields[fieldPointer(key)] = true
+				fields[resultset.FieldPointer(key)] = true
 			}
 		}
 	}

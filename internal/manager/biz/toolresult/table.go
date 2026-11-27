@@ -90,13 +90,18 @@ func (u *Usecase) tableRows(ctx context.Context, scope Scope, spec TableSpec, ma
 			spec.Rows, spec.TextPointer = h.RowsPointer, h.TextPointer
 		}
 	} else if spec.TextPointer == "" && isMCPResult(meta.ToolName) {
-		// Receipts describe business row paths relative to the decoded document.
-		// Honor an explicit outer path first; infer only a single text envelope.
-		obj, _ := root.(map[string]any)
-		blocks, _ := obj["content"].([]any)
-		if _, ok := singleMCPText(blocks); ok && obj["structuredContent"] == nil {
-			if _, found := resultfile.Pointer(root, spec.Rows); !found {
-				spec.TextPointer = "/content/0/text"
+		// Preserve explicit outer pointers. Otherwise resolve the same row path
+		// inside the native document or a unique matching text block.
+		if _, found := resultfile.Pointer(root, spec.Rows); !found {
+			obj, _ := root.(map[string]any)
+			if native := obj["structuredContent"]; native != nil {
+				root = native
+			} else if blocks, ok := obj["content"].([]any); ok {
+				source, err := resultset.SelectTextRows(mcpBlockTexts(blocks), &spec.Rows, "")
+				if err != nil {
+					return nil, metaBytes, err
+				}
+				root = source.Document
 			}
 		}
 	}
@@ -107,6 +112,9 @@ func (u *Usecase) tableRows(ctx context.Context, scope Scope, spec TableSpec, ma
 			return nil, metaBytes, fmt.Errorf("no JSON text at %q", spec.TextPointer)
 		}
 		root, err = resultset.Decode(strings.NewReader(s))
+		if _, obj := root.(map[string]any); err == nil && obj && spec.Rows == "" {
+			spec.Rows, _, err = resultset.DiscoverRows(root, "")
+		}
 		if err != nil {
 			return nil, metaBytes, err
 		}

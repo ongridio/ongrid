@@ -160,7 +160,7 @@ func (f inventoryFixture) InvokableRun(ctx context.Context, _ string, _ ...baset
 }
 
 func TestChatInventoryRequiresSourceForHTMLList(t *testing.T) {
-	for _, kind := range []string{"text", "structured", "near_limit"} {
+	for _, kind := range []string{"text", "structured", "near_limit", "ambiguous_text"} {
 		t.Run(kind, func(t *testing.T) {
 			u, _, _, scope := fixture(t)
 			data := `{"total":1,"items":[{"id":9007199254740993}]}`
@@ -169,6 +169,10 @@ func TestChatInventoryRequiresSourceForHTMLList(t *testing.T) {
 			}
 			encoded, _ := json.Marshal(data)
 			raw := `{"content":[{"type":"text","text":` + string(encoded) + `}]}`
+			if kind == "ambiguous_text" {
+				raw = `{"content":[{"type":"text","text":` + string(encoded) + `},{"type":"text","text":"[{}]"}]}`
+				data += "\n[{}]"
+			}
 			if kind == "structured" {
 				raw = `{"structuredContent":` + data + `}`
 			}

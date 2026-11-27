@@ -78,14 +78,15 @@ func (t *capturedTool) InvokableRun(ctx context.Context, args string, opts ...ba
 func capturedCollection(output, id string) bool {
 	var saved View
 	if json.Unmarshal([]byte(output), &saved) == nil && saved.Kind == "tool_result" && saved.ResultID == id {
-		return saved.TableSource != nil || hasBusinessArray(saved)
+		return saved.TableSource != nil || saved.AmbiguousRowSource || hasBusinessArray(saved)
 	}
 	// A full inline result can fit by itself but exceed the view budget with
 	// its receipt. Keep its execution-linked ID available for a later export.
 	if len(output) > ViewLimit {
 		return false
 	}
-	return describeSavedTable([]byte(output), false, false) != nil
+	source, _ := describeSavedTable([]byte(output), false, false) // A standalone display value can be ordinary prose.
+	return source != nil
 }
 
 func hasBusinessArray(v View) bool {

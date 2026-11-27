@@ -78,7 +78,7 @@ func (t Tool) ChatInputSchema() json.RawMessage {
 	if json.Unmarshal(schema, &s) != nil || json.Unmarshal(s["properties"], &props) != nil {
 		return schema
 	}
-	props[AllPagesArgument] = json.RawMessage(`{"type":"object","description":"For a complete inventory, full list, count across pages or report, set this option on the first query. Ongrid follows pagination in this call and saves all rows at /structuredContent/rows. Omit for a single page or sample. Pointers are relative to structuredContent or the JSON inside a single text block.","properties":{"rows_pointer":{"type":"string","description":"Array path, e.g. /items, /data/records, or empty for a root array"},"total_pointer":{"type":"string","description":"Upstream total if nonstandard; total, totalCount and total_count are detected"},"next_pointer":{"type":"string","description":"Upstream continuation if nonstandard; nextCursor, next_cursor and nextPageToken are detected"},"id_pointer":{"type":"string","description":"Unique row identifier within each record, when known"}},"required":["rows_pointer"],"additionalProperties":false}`)
+	props[AllPagesArgument] = json.RawMessage(`{"type":"object","description":"For a complete list or count, pass {} on the first query. Ongrid follows pages of a unique record array and saves it at /structuredContent/rows. Omit for a single page. Use the returned candidate paths if the source is ambiguous.","properties":{"rows_pointer":{"type":"string","description":"Explicit array path relative to structuredContent or a decoded JSON text block. Use an empty string for the document root."},"text_pointer":{"type":"string","description":"Select a specific /content/N/text block when multiple blocks carry the requested rows."},"total_pointer":{"type":"string","description":"Upstream total if nonstandard; total, totalCount and total_count are detected"},"next_pointer":{"type":"string","description":"Upstream continuation if nonstandard; nextCursor, next_cursor and nextPageToken are detected"},"id_pointer":{"type":"string","description":"Unique row identifier within each record, when known"}},"additionalProperties":false}`)
 	s["properties"], _ = json.Marshal(props)
 	out, _ := json.Marshal(s)
 	return out
@@ -89,7 +89,9 @@ func CanCollect(t Tool) bool { _, ok := t.collectionPager(); return ok }
 
 type collectionPlan struct {
 	resultset.Selection
-	ID string `json:"id_pointer"`
+	ID          string `json:"id_pointer"`
+	TextPointer string `json:"text_pointer,omitempty"`
+	discover    bool
 }
 
 func decodePlan(args map[string]any) (collectionPlan, error) {
@@ -99,15 +101,19 @@ func decodePlan(args map[string]any) (collectionPlan, error) {
 		return plan, err
 	}
 	var fields map[string]json.RawMessage
-	if json.Unmarshal(raw, &fields) != nil || fields["rows_pointer"] == nil || string(fields["rows_pointer"]) == "null" {
-		return plan, fmt.Errorf("ongrid_all_pages requires rows_pointer")
+	if json.Unmarshal(raw, &fields) != nil || fields == nil {
+		return plan, fmt.Errorf("ongrid_all_pages must be an object")
+	}
+	plan.discover = fields["rows_pointer"] == nil
+	if string(fields["rows_pointer"]) == "null" {
+		return plan, fmt.Errorf("rows_pointer must be a string when supplied")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err = decoder.Decode(&plan); err != nil {
 		return plan, err
 	}
-	for _, ptr := range []string{plan.Rows, plan.Total, plan.Next, plan.ID} {
+	for _, ptr := range []string{plan.Rows, plan.Total, plan.Next, plan.ID, plan.TextPointer} {
 		if !resultfile.ValidPointer(ptr) {
 			return plan, fmt.Errorf("invalid pagination JSON pointer %q", ptr)
 		}
@@ -248,22 +254,7 @@ func (c *Client) collectPages(ctx context.Context, name string, pg pager, plan c
 		if res.IsError {
 			return fmt.Errorf("upstream reported an error: %.512s", res.TextContent())
 		}
-		raw := res.StructuredContent
-		if len(raw) == 0 || string(raw) == "null" {
-			if len(res.Content) != 1 || res.Content[0].Type != "text" {
-				return fmt.Errorf("expected structuredContent or one JSON text block")
-			}
-			raw = []byte(res.Content[0].Text)
-		}
-		state.bytes += len(raw)
-		if state.bytes > MaxResponseBytes {
-			return fmt.Errorf("collection exceeds %d bytes", MaxResponseBytes)
-		}
-		root, err := resultset.Decode(bytes.NewReader(raw))
-		if err != nil {
-			return err
-		}
-		page, err := plan.Page(root)
+		page, err := plan.readPage(res, state)
 		if err != nil {
 			return err
 		}
@@ -304,4 +295,47 @@ func (c *Client) collectPages(ctx context.Context, name string, pg pager, plan c
 		}
 	}
 	return fmt.Errorf("collection exceeds 100 pages")
+}
+
+func (plan *collectionPlan) readPage(res *CallResult, state *collectedRows) (resultset.Page, error) {
+	var root any
+	var err error
+	path := plan.Rows
+	if raw := res.StructuredContent; plan.TextPointer == "" && len(raw) > 0 && !bytes.Equal(raw, []byte("null")) {
+		state.bytes += len(raw)
+		if state.bytes <= MaxResponseBytes {
+			root, err = resultset.Decode(bytes.NewReader(raw))
+			if err == nil && plan.discover {
+				path, _, err = resultset.DiscoverRows(root, "")
+			}
+		}
+	} else {
+		texts := make([]string, len(res.Content))
+		for i, block := range res.Content {
+			if block.Type == "text" {
+				texts[i] = block.Text
+				state.bytes += len(block.Text)
+			}
+		}
+		if state.bytes <= MaxResponseBytes {
+			requested := &plan.Rows
+			if plan.discover {
+				requested = nil
+			}
+			var source resultset.TextRows
+			source, err = resultset.SelectTextRows(texts, requested, plan.TextPointer)
+			root, path = source.Document, source.RowsPointer
+		}
+	}
+	if state.bytes > MaxResponseBytes {
+		return resultset.Page{}, fmt.Errorf("collection exceeds %d bytes", MaxResponseBytes)
+	}
+	if err != nil {
+		return resultset.Page{}, err
+	}
+	if state.pages > 0 && path != plan.Rows {
+		return resultset.Page{}, fmt.Errorf("row path changed from %q to %q during pagination; specify rows_pointer", plan.Rows, path)
+	}
+	plan.Rows = path
+	return plan.Page(root)
 }

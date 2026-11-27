@@ -19,6 +19,7 @@ import (
 	model "github.com/ongridio/ongrid/internal/manager/model/toolresult"
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 	"github.com/ongridio/ongrid/internal/pkg/resultfile"
+	"github.com/ongridio/ongrid/internal/pkg/resultset"
 )
 
 type Request struct {
@@ -187,7 +188,10 @@ func (u *Usecase) structurePage(ctx context.Context, row *model.Result, req Requ
 			idx = resultfile.BuildIndex(body)
 		}
 		if describeRows {
-			p.TableSource = describeSavedTable(body, true, true)
+			p.TableSource, err = describeSavedTable(body, true, true)
+			if errors.Is(err, resultset.ErrAmbiguousRows) {
+				p.Notice = prefix(err.Error(), 1024)
+			}
 		}
 	}
 	kinds := make(map[string]string, len(idx.Collections)+len(idx.TextPointers)+len(idx.ValuePointers))

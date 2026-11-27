@@ -165,7 +165,7 @@ func (m *tableModel) reply(msgs []*schema.Message) (*schema.Message, error) {
 	}
 	switch m.step {
 	case 1:
-		return call("mcp__inventory__list_assets", `{"env":"prod","ongrid_all_pages":{"rows_pointer":"/items","id_pointer":"/id"}}`), nil
+		return call("mcp__inventory__list_assets", `{"env":"prod","ongrid_all_pages":{"id_pointer":"/id"}}`), nil
 	case 2:
 		var view toolresult.View
 		if err := json.Unmarshal([]byte(msgs[len(msgs)-1].Content), &view); err != nil || view.ResultID == "" || view.CaptureStatus != "complete" {

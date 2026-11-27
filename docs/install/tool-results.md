@@ -39,9 +39,22 @@ The excerpt view lists arrays in `collection_pointers`, strings in `text_pointer
 | JSON encoded in a string | Use analysis format `json_text`, set `pointer` to the string, and set `collection_pointer` to the array inside the decoded JSON. The corresponding `text_pointer` and `rows_pointer` from the saved receipt are accepted aliases. |
 | Single JSON object or scalar | Use analysis format `json_value`. It emits one record and applies the 1 MiB record limit. |
 
+### Finding data in an unfamiliar result
+
+Use the upstream tool's filters and field selection when available. If its complete answer fits in the first response, use it directly. For a saved result, keep the `result_id` and choose a follow-up based on the question.
+
+| Question | First call on the saved result | Evidence returned |
+| --- | --- | --- |
+| Which records are present? | `read_tool_result` with `mode="rows"` and `result_id` | Sample records and source row count for a unique collection. If several collections match, select the relevant candidate path. |
+| How many records match both conditions? | `query_tool_result` with `mode="rows"`, both filters and the desired fields | Exact match count over the selected saved rows and bounded examples. Use the same selection for export. |
+| Where does this error or request ID occur? | `query_tool_result` with `contains` | Matching excerpts, byte ranges and scan coverage. Read surrounding bytes by offset or continue with the returned cursor. |
+| How do I aggregate a large array, CSV or log? | Inspect the result paths with `read_tool_result` in `structure` mode, then call `analyze_tool_results` on Linux with the appropriate format | A streamed calculation and coverage for each input. For JSON encoded in text, use the outer text pointer and inner collection pointer. |
+
+For example, to find open tickets owned by a team, first sample the collection to identify the actual status and ownership fields. Apply both conditions in one row query. A limited sample can establish that an example exists. A claim about all tickets also requires evidence that the upstream query covered all pages. Resource links identify external content and any records in the linked target require a separate read.
+
 ## Complete lists and HTML exports
 
-For a complete list from a read-only MCP query with a cursor, page number or offset in its input schema, the chat tool accepts `ongrid_all_pages`. Set `rows_pointer` to the business array inside `structuredContent` or the JSON in a single text block. Supply `total_pointer` and `next_pointer` for nonstandard response fields, and `id_pointer` when rows have a unique key. The Manager keeps the original query filters on every page. Tools that require approval show the all-pages request as one approval. Single-page calls use the upstream tool as usual.
+For a complete list from a supported read-only MCP query with a cursor, page number or offset in its input schema, pass `"ongrid_all_pages": {}`. The Manager discovers a unique array of object records and verifies its path on subsequent pages. A text block containing those rows can move between pages. To select among candidate arrays or read an array of scalars, supply `rows_pointer` relative to the native document or decoded JSON text. When multiple text blocks contain that array, supply `text_pointer` as well. Supply `total_pointer` and `next_pointer` for nonstandard response fields, and `id_pointer` when rows have a unique key. The Manager keeps the original query filters on every page. Tools that require approval show the all-pages request as one approval. Single-page calls use the upstream tool as usual.
 
 The saved aggregate exposes `/structuredContent/rows`. Page and offset queries require an upstream total. Cursor queries follow the cursor to its end and verify a supplied total. Missing rows, repeating cursors or pages, and upstream failures produce partial evidence. One collection runs for up to a minute, with at most 100 pages, 100,000 rows and 16 MiB of business response data.
 
@@ -61,9 +74,9 @@ The page tool reads the authorized session result, applies all filters and retur
 
 For exclusion-only chat exports, the Manager checks up to 256 evenly spaced matching records for mixed categories. If it finds a repeated category alongside other values on an unfiltered field, it returns those values before saving the page. Supply the missing inclusion filters, or set `all_remaining_categories` when the request covers every remaining category.
 
-A row path missing from the outer MCP response can also be resolved inside a single text block when there is no native structured content. For an explicit text selection, use `text_pointer` (such as `/content/0/text`) and a row pointer relative to the decoded text. A reported upstream total or an explicit `expected_rows` is compared with the number of source rows before filtering. Without upstream pagination metadata, the counts cover the selected saved array. A table accepts up to 32 columns, 16 MiB of input and 16 MiB of rendered output. Pages without a saved data source can still use `html` alone.
+A row path missing from the outer MCP response can also be resolved relative to native structured content or, in its absence, inside the unique text block containing that row path. Display text and non-text blocks may appear before or after the JSON. For an explicit text selection, use `text_pointer` (such as `/content/0/text`) and a row pointer relative to the decoded text. A reported upstream total or an explicit `expected_rows` is compared with the number of source rows before filtering. Without upstream pagination metadata, the counts cover the selected saved array. A table accepts up to 32 columns, 16 MiB of input and 16 MiB of rendered output. Pages without a saved data source can still use `html` alone.
 
-For a successful MCP result, a bounded excerpt can include `table_source` for a unique array of objects in native structured content or a single JSON text block. It includes the row count of this capture and field pointers observed in the first three rows. Captures up to 1 MiB with at most 2,000 rows can also include exact counts for selected low-cardinality text fields. Each distribution describes its own field within the saved page. Filtering and export evaluate the actual intersection on the original records.
+For a successful MCP result, a bounded excerpt can include `table_source` for a unique array of objects in native structured content or one matching JSON text block. It includes the row count of this capture and field pointers observed in the first three rows. Captures up to 1 MiB with at most 2,000 rows can also include exact counts for selected low-cardinality text fields. Each distribution describes its own field within the saved page. Filtering and export evaluate the actual intersection on the original records.
 
 For a unique row array, `read_tool_result` and `query_tool_result` in `rows` mode and `serve_page.table` resolve the business rows from `result_id`. When several arrays are possible, select a candidate using `rows_pointer` and, for encoded text, `text_pointer`. For example, this query counts each status and region among matching rows and returns a small sample.
 
@@ -73,16 +86,14 @@ For a unique row array, `read_tool_result` and `query_tool_result` in `rows` mod
 
 Row queries verify declared upstream pagination and accept up to 8 MiB of saved input. The sample is bounded to five rows and the tool response budget. Unfiltered samples span the saved row order. If a grouped query requests samples without specifying fields, each sample shows the grouping fields together from one row. For a broad upstream search, check both the requested inclusion criteria and exclusions before exporting. A group with more than eight distinct values, long or structured values, or insufficient response space has `values_omitted` set. Missing fields are counted separately from null. Exact `matched_rows` is independent of whether samples or distributions fit. Use analysis for custom calculations or joins.
 
-All filters must pass. Use `or_pointers` when a keyword may occur in several fields, and `ignore_case` for case-insensitive comparisons. For example, the following source specification for a model-authored page selects rows with “svn” in either the hostname or the description, excluding rows where either ownership field contains “Example Team”.
+All filters must pass. Use `or_pointers` when a keyword may occur in several fields, and `ignore_case` for case-insensitive comparisons. Here a saved issue search has one collection. The page includes issues mentioning “timeout” in their title or description and excludes issues owned by the sandbox team.
 
 ```json
 {
   "result_id": "<saved-result-uuid>",
-  "text_pointer": "/content/0/text",
-  "rows_pointer": "/data",
   "filters": [
-    {"pointer": "/hostname", "or_pointers": ["/description"], "op": "contains", "value": "svn", "ignore_case": true},
-    {"pointer": "/owner", "or_pointers": ["/department"], "op": "not_contains", "value": "Example Team"}
+    {"pointer": "/title", "or_pointers": ["/description"], "op": "contains", "value": "timeout", "ignore_case": true},
+    {"pointer": "/team", "op": "not_equals", "value": "Sandbox"}
   ]
 }
 ```

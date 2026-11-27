@@ -24,6 +24,7 @@ import (
 	"github.com/ongridio/ongrid/internal/pkg/errs"
 	"github.com/ongridio/ongrid/internal/pkg/mcpclient"
 	"github.com/ongridio/ongrid/internal/pkg/resultfile"
+	"github.com/ongridio/ongrid/internal/pkg/resultset"
 	"github.com/ongridio/ongrid/internal/pkg/toolcapture"
 )
 
@@ -137,6 +138,7 @@ type View struct {
 	PathIndexPartial   bool                `json:"path_index_partial,omitempty"`
 	Preview            string              `json:"preview,omitempty"`
 	StructuredContent  json.RawMessage     `json:"structuredContent,omitempty"`
+	AmbiguousRowSource bool                `json:"ambiguous_row_source,omitempty"`
 	TableSource        *TableSource        `json:"table_source,omitempty"`
 	Instruction        string              `json:"instruction,omitempty"`
 }
@@ -320,7 +322,11 @@ func (u *Usecase) Capture(ctx context.Context, scope Scope, executionID, tool, o
 		v.Instruction += " For this saved analysis use json_text at /stdout with collection_pointer /values or /coverage."
 	}
 	if isMCPResult(tool) && status == "success" && row.CaptureStatus == "complete" {
-		v.TableSource = describeSavedTable(raw, true, true)
+		v.TableSource, err = describeSavedTable(raw, true, true)
+		if errors.Is(err, resultset.ErrAmbiguousRows) {
+			v.AmbiguousRowSource = true
+			v.Instruction += " " + prefix(err.Error(), 1024)
+		}
 		if v.TableSource != nil {
 			v.Instruction = "See saved_row_value_counts for individual field distributions. " + rowSelectionHint + " For HTML, send your layout and table.result_id with the complete filters to serve_page. For examples or to check their intersection, use query_tool_result mode=rows. Omit row paths for a unique collection."
 		}
@@ -339,12 +345,20 @@ func inlineMCPResult(v View, raw []byte, output string, small bool) (string, boo
 	}
 	if len(mcp.Structured) == 0 || string(mcp.Structured) == "null" {
 		direct := small || (v.Status == "success" && len(output) <= ViewLimit && isCompleteMCPText(raw, output))
-		if direct && v.Status == "success" && json.Valid([]byte(output)) {
-			if h := describeSavedTable(raw, true, false); h != nil {
+		if direct && v.Status == "success" && strings.Contains(output, "[") {
+			h, err := describeSavedTable(raw, true, false)
+			if h != nil || errors.Is(err, resultset.ErrAmbiguousRows) {
 				// Preserve the full business JSON and a usable export reference together when they fit.
 				v.TableSource, v.Preview, v.Instruction, v.ViewStatus = h, output, "", "inline"
+				if err != nil {
+					v.AmbiguousRowSource = true
+					v.Instruction = prefix(err.Error(), 1024)
+				}
 				if body, err := json.Marshal(v); err == nil && len(body) <= ViewLimit {
 					return string(body), true
+				}
+				if err != nil || !json.Valid([]byte(output)) {
+					return "", false // Keep the result ID when a multi-part response needs a saved view.
 				}
 			}
 		}

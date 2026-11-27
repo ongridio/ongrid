@@ -157,7 +157,7 @@ func (t *readerTool) queryRows(ctx context.Context, q rowQuery) (string, int64, 
 				return "", 0, fmt.Errorf("invalid row field")
 			}
 			if !strings.HasPrefix(p, "/") {
-				p = fieldPointer(p)
+				p = resultset.FieldPointer(p)
 			}
 			if !resultfile.ValidPointer(p) {
 				return "", 0, fmt.Errorf("invalid row field %q", p)

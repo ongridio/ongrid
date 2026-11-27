@@ -498,7 +498,16 @@ cursor 绑定 result_id、内容版本、part、查询指纹、偏移和有效�
 
 ## 17. 公开方案参考
 
-- [Claude Code MCP 输出处理](https://code.claude.com/docs/en/mcp#mcp-output-limits-and-warnings)：大文本结果落盘，通过路径按需读取；不代表无限接收上游响应。
+### 不同 MCP 的大结果如何进入模型上下文
+
+MCP 定义工具响应可以携带的内容。服务可以提供结构化结果、文本、资源或链接，也可以声明输出 schema。标准游标分页适用于工具目录、资源目录等列表操作。单个业务工具返回的记录字段、分页参数和总数由该工具定义。Ongrid 的 `result_id`、行筛选和完整性检查属于客户端能力。[工具结果规范](https://modelcontextprotocol.io/specification/2026-07-28/server/tools#tool-result) · [分页适用范围](https://modelcontextprotocol.io/specification/2026-07-28/server/utilities/pagination#operations-supporting-pagination)
+
+Claude Code 将超过阈值的成功非图片结果保存到会话文件，给模型路径供后续读取。Codex 的公开实现对写入模型历史的 MCP 结果施加输出预算，Code Mode 可处理原始结果。Anthropic 的工程示例进一步展示了在执行环境过滤一万行数据后，只返回计数和少量样本的做法。[Claude Code 文档](https://code.claude.com/docs/en/mcp#mcp-output-limits-and-warnings) · [Codex 的 MCP 输出实现](https://github.com/openai/codex/blob/afe555b9d3e95b4f58b247212565070f1555bc5d/codex-rs/core/src/tools/context.rs#L216-L282) · [Anthropic 的筛选示例](https://www.anthropic.com/engineering/code-execution-with-mcp)
+
+Ongrid 复用会话内的结果引用。模型看到有界预览后，可在同一份保存结果上查看字段、定位文本、筛选行或执行流式计算。一个明确的记录数组可直接查询。发现多个候选时返回路径，请模型依据任务选择。收据、查询、跨页收集和 HTML 导出共用行发现规则。模型选择“哪些字段表达用户条件”，Manager 执行筛选并返回计数。查询只覆盖一页或源数据已截断时，需要在回答里说明范围。[调用示例与容量边界](../install/tool-results.md#finding-data-in-an-unfamiliar-result)
+
+### 其他存储与上下文处理参考
+
 - [Codex 历史处理](https://github.com/openai/codex/blob/main/codex-rs/core/src/context_manager/history.rs#L628)：保留记录与模型历史投影分离。
 - [Codex 冷会话压缩](https://github.com/openai/codex/blob/main/codex-rs/rollout/src/compression.rs)：当前公开实现可将冷 JSONL 记录压为 `.jsonl.zst`；续写前物化为 JSONL。[功能定义](https://github.com/openai/codex/blob/main/codex-rs/features/src/lib.rs#L1480)将 `local_thread_store_compression` 标为开发中且默认关闭。它不是所有工具结果默认分块压缩的证据。
 - [Codex 请求体压缩](https://github.com/openai/codex/blob/main/codex-rs/http-client/src/request.rs)：支持 Zstd 网络请求编码，与本地结果存储是不同路径。
