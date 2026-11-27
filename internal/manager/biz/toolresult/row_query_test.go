@@ -181,7 +181,11 @@ func TestSavedFieldDistributionsDescribeOnlyCapturedRows(t *testing.T) {
 		if i < 3 {
 			status = "closed"
 		}
-		tickets = append(tickets, map[string]any{"状态": status, "ticket": fmt.Sprintf("T-%03d", i), "description": strings.Repeat("long ", 80)})
+		queue := "general"
+		if i == 8 {
+			queue = "escalated"
+		}
+		tickets = append(tickets, map[string]any{"状态": status, "queue": queue, "ticket": fmt.Sprintf("T-%03d", i), "description": strings.Repeat("long ", 80)})
 	}
 	body, _ := json.Marshal(map[string]any{"total": 20, "items": tickets})
 	for _, native := range []bool{true, false} {
@@ -200,6 +204,12 @@ func TestSavedFieldDistributionsDescribeOnlyCapturedRows(t *testing.T) {
 		hints, _ := json.Marshal(v.TableSource.ValueCounts)
 		if !strings.Contains(string(hints), `"value":"closed","count":3`) || !strings.Contains(string(hints), `"value":"open","count":11`) || strings.Contains(string(hints), "ticket") {
 			t.Fatal(string(hints))
+		}
+		examples := v.TableSource.ContrastingRows
+		if len(examples) != 2 || len(examples[0]) != 2 || len(examples[1]) != 2 ||
+			examples[0]["/状态"] != "closed" || examples[0]["/queue"] != "general" ||
+			examples[1]["/状态"] != "open" || examples[1]["/queue"] != "escalated" {
+			t.Fatalf("expected projections from the two contrasting records: %v", examples)
 		}
 		tool := u.BindTools(scope, nil)[1]
 		if _, err := tool.InvokableRun(ctx, `{"result_id":"`+v.ResultID+`","mode":"rows","group_by":["状态"]}`); err == nil || !strings.Contains(err.Error(), "14 of 20") {

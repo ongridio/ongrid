@@ -209,6 +209,8 @@ func encodeView(v View) string {
 		switch {
 		case len(v.Preview) > 0:
 			v.Preview = prefix(v.Preview, len(v.Preview)/2)
+		case v.TableSource != nil && len(v.TableSource.ContrastingRows) > 0:
+			v.TableSource.ContrastingRows = nil
 		case v.TableSource != nil && len(v.TableSource.SampleFields) > 0:
 			v.TableSource.SampleFields = v.TableSource.SampleFields[:len(v.TableSource.SampleFields)-1]
 		case v.TableSource != nil && len(v.TableSource.ValueCounts) > 0:
@@ -341,7 +343,10 @@ func (u *Usecase) Capture(ctx context.Context, scope Scope, executionID, tool, o
 			v.Instruction += " " + prefix(err.Error(), 1024)
 		}
 		if v.TableSource != nil {
-			v.Instruction = "Use the observed field pointers to design columns and saved_row_value_counts to identify the requested categories. " + rowSelectionHint + " When the criteria are clear, call serve_page directly with html and table {result_id, filters}. It computes all counts from the original rows. Use query_tool_result mode=rows only if an example or a field value is still needed. Omit row paths for a unique collection."
+			v.Instruction = rowSelectionHint + ` For HTML, use {"html":"...","table":{"result_id":"` + row.ID + `","filters":[...]}}. The server computes the intersection and all counts. Query rows when a field or value is unclear.`
+			if len(v.TableSource.ContrastingRows) > 0 {
+				v.Instruction = "Mixed categories: compare contrasting_rows when present. For a specific kind or area with an exception, include its positive equals/contains filter AND the negative exception filter. An exclusion alone triggers a scope review. " + v.Instruction
+			}
 		} else if len(raw) <= ScanLimit {
 			for _, path := range v.CollectionPointers {
 				if (path == "/structuredContent" || strings.HasPrefix(path, "/structuredContent/")) && indexedRecordArray(raw, idx.Collections[path]) {
